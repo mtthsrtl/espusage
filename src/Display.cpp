@@ -453,6 +453,17 @@ static void toggleView() {
   renderAll();
 }
 
+bool displaySetRemainingView(bool remaining) {
+  availableView = remaining;
+  Serial.printf("[display][api] view=%s\n", availableView ? "remaining" : "used");
+  renderAll();
+  return availableView;
+}
+
+bool displayToggleRemainingView() {
+  return displaySetRemainingView(!availableView);
+}
+
 static void addTouchCallbacks(lv_obj_t *object, uint8_t detailIndex) {
   lv_obj_add_flag(object, LV_OBJ_FLAG_CLICKABLE);
   lv_obj_add_event_cb(object, openDetails, LV_EVENT_LONG_PRESSED, (void *)(uintptr_t)detailIndex);

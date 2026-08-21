@@ -195,6 +195,21 @@ void webBegin(AppConfig &c, bool setupMode){
    d["remaining_view"]=t.remainingView;
    String s; serializeJson(d,s); server.sendHeader("Cache-Control","no-store"); server.send(200,"application/json",s);
  });
+
+ server.on("/api/display",HTTP_GET,[]{
+   String mode=server.arg("mode"); mode.toLowerCase();
+   bool remaining;
+   if(mode=="toggle") remaining=displayToggleRemainingView();
+   else if(mode=="used") remaining=displaySetRemainingView(false);
+   else if(mode=="remaining") remaining=displaySetRemainingView(true);
+   else {
+     server.sendHeader("Cache-Control","no-store");
+     server.send(400,"application/json","{\"ok\":false,\"error\":\"mode must be toggle, used, or remaining\"}");
+     return;
+   }
+   JsonDocument d; d["ok"]=true; d["mode"]=remaining?"remaining":"used";
+   String s; serializeJson(d,s); server.sendHeader("Cache-Control","no-store"); server.send(200,"application/json",s);
+ });
  server.on("/api/health",HTTP_GET,[]{server.send(200,"application/json","{\"ok\":true}");});
  server.on("/api/wifi/scan",HTTP_GET,[]{
    Serial.println("[wifi][scan] Scanning for access points");
