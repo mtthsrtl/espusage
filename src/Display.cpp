@@ -1,4 +1,5 @@
 #include "Display.h"
+#include "ProviderIcons.h"
 #include <Arduino.h>
 #include <Arduino_GFX_Library.h>
 #include <Wire.h>
@@ -26,6 +27,13 @@ static int touchX = 0, touchY = 0;
 static bool touchWasPressed = false, touchPendingToggle = false, detailsOpen = false;
 static uint32_t touchDownMs = 0;
 static int touchDownX = 0, touchDownY = 0;
+static String touchBusDevices = "not scanned", touchLastError = "not initialized", touchLastEvent = "none";
+static bool touchPossibleGsl3680 = false;
+static uint8_t touchLastState = 0, touchLastCount = 0;
+static uint16_t touchRawWidth = 0, touchRawHeight = 0, touchRawX = 0, touchRawY = 0;
+static uint32_t touchCallbackCalls = 0, touchProbeAttempts = 0, touchPolls = 0, touchStateReads = 0;
+static uint32_t touchStateReadErrors = 0, touchReadyFrames = 0, touchPointFrames = 0, touchAcknowledgeErrors = 0;
+static uint32_t touchDownEvents = 0, touchUpEvents = 0, touchTapEvents = 0, touchToggleEvents = 0, touchLastEventMs = 0;
 
 static lv_obj_t *networkLabel, *modeLabel, *providerStatusLabels[2];
 static lv_obj_t *statusLabels[4], *values[4], *bars[4], *paceMarkers[4], *resetLabels[4], *rows[4];
@@ -79,18 +87,22 @@ static bool touchWriteRegister(uint16_t reg, uint8_t value) {
 
 static void touchScanBus() {
   String found;
+  touchPossibleGsl3680 = false;
   for (uint8_t address = 1; address < 127; ++address) {
     Wire.beginTransmission(address);
     if (Wire.endTransmission(true) == 0) {
+      if (address == 0x40) touchPossibleGsl3680 = true;
       if (found.length()) found += ", ";
       char item[8]; snprintf(item, sizeof(item), "0x%02X", address); found += item;
     }
   }
+  touchBusDevices = found.length() ? found : "none";
   Serial.printf("[touch][i2c] Bus scan on SDA=%u/SCL=%u: %s\n", TOUCH_SDA, TOUCH_SCL,
-                found.length() ? found.c_str() : "no devices");
+                touchBusDevices.c_str());
 }
 
 static bool touchProbe() {
+  touchProbeAttempts++;
   uint8_t switches = 0;
   const uint8_t addresses[] = {GT911_PRIMARY_ADDRESS, GT911_SECONDARY_ADDRESS};
   for (uint8_t address : addresses) {
@@ -102,12 +114,17 @@ static bool touchProbe() {
       rawWidth = (uint16_t)limits[0] | ((uint16_t)limits[1] << 8);
       rawHeight = (uint16_t)limits[2] | ((uint16_t)limits[3] << 8);
     }
+    touchRawWidth = rawWidth; touchRawHeight = rawHeight;
     touchReadErrors = 0;
+    touchLastError = "none";
     Serial.printf("[touch][gt911] Detected at 0x%02X, raw=%ux%u, poll=16ms, transform=180deg\n",
                   touchAddress, rawWidth, rawHeight);
     return true;
   }
   touchAddress = 0;
+  touchLastError = touchPossibleGsl3680
+                     ? "GT911 missing; I2C device 0x40 may be a GSL3680 variant"
+                     : "GT911 not found at 0x5D or 0x14";
   Serial.println("[touch][gt911] Not found at 0x5D or 0x14; retrying in 2s");
   return false;
 }
@@ -121,11 +138,13 @@ static void touchBegin() {
   Wire.setClock(50000);  // EspControl/ESPHome default for this exact board.
   Wire.setTimeOut(50);
   touchLastProbeMs = millis();
-  if (!touchProbe()) touchScanBus();
+  touchScanBus();
+  touchProbe();
   Serial.println("[touch][gesture] Raw tap detection enabled (35-650ms)");
 }
 
 static void readTouch(lv_indev_drv_t *, lv_indev_data_t *data) {
+  touchCallbackCalls++;
   uint32_t now = millis();
   if (!touchAddress && now - touchLastProbeMs >= 2000) {
     touchLastProbeMs = now;
@@ -133,8 +152,11 @@ static void readTouch(lv_indev_drv_t *, lv_indev_data_t *data) {
   }
   if (touchAddress && now - touchLastPollMs >= 16) {
     touchLastPollMs = now;
+    touchPolls++;
     uint8_t state = 0;
     if (!touchReadRegister(GT911_TOUCH_STATE, &state, 1)) {
+      touchStateReadErrors++;
+      touchLastError = "GT911 touch-state read failed";
       if (++touchReadErrors == 8) {
         Serial.printf("[touch][gt911] Repeated I2C errors at 0x%02X; probing both addresses again\n", touchAddress);
         touchAddress = 0;
@@ -142,13 +164,19 @@ static void readTouch(lv_indev_drv_t *, lv_indev_data_t *data) {
         touchLastProbeMs = now;
       }
     } else {
+      touchStateReads++;
       touchReadErrors = 0;
       uint8_t count = state & 0x07;
+      touchLastState = state; touchLastCount = count;
       if (state & 0x80) {
+        touchReadyFrames++;
         // Match the proven ESPHome GT911 sequence used by EspControl: clear
         // the ready flag immediately, then fetch the current point buffer.
-        if (!touchWriteRegister(GT911_TOUCH_STATE, 0))
+        if (!touchWriteRegister(GT911_TOUCH_STATE, 0)) {
+          touchAcknowledgeErrors++;
+          touchLastError = "GT911 frame acknowledgement failed";
           Serial.println("[touch][gt911] Could not acknowledge touch frame");
+        }
         touchLastFrameMs = now;
         if (count > 0 && count <= 5) {
           uint8_t points[41] = {};
@@ -156,12 +184,14 @@ static void readTouch(lv_indev_drv_t *, lv_indev_data_t *data) {
           if (touchReadRegister(GT911_FIRST_POINT, points, readLength)) {
             uint16_t rawX = (uint16_t)points[1] | ((uint16_t)points[2] << 8);
             uint16_t rawY = (uint16_t)points[3] | ((uint16_t)points[4] << 8);
+            touchRawX = rawX; touchRawY = rawY; touchPointFrames++;
+            touchLastError = "none";
             // EspControl uses mirror_x/y=false and LVGL rotation=180. Our LVGL
             // framebuffer is unrotated, so apply that single 180° transform here.
             touchX = constrain(479 - (int)rawX, 0, 479);
             touchY = constrain(479 - (int)rawY, 0, 479);
             touchPressed = true;
-          }
+          } else touchLastError = "GT911 point-buffer read failed";
         } else touchPressed = false;
       } else if (touchPressed && now - touchLastFrameMs > 120) touchPressed = false;
     }
@@ -171,13 +201,17 @@ static void readTouch(lv_indev_drv_t *, lv_indev_data_t *data) {
   data->point.y = touchY;
   if (touchPressed && !touchWasPressed) {
     touchDownMs = now; touchDownX = touchX; touchDownY = touchY;
+    touchDownEvents++; touchLastEventMs = now; touchLastEvent = "down";
     Serial.printf("[touch][gesture] down x=%d y=%d\n", touchX, touchY);
   }
   if (!touchPressed && touchWasPressed) {
     uint32_t duration = now - touchDownMs;
     int movement = abs(touchX - touchDownX) + abs(touchY - touchDownY);
     bool tap = duration >= 35 && duration <= 650 && movement <= 80;
-    if (tap && !detailsOpen) touchPendingToggle = true;
+    touchUpEvents++; touchLastEventMs = now; touchLastEvent = "up";
+    if (tap && !detailsOpen) {
+      touchPendingToggle = true; touchTapEvents++; touchLastEvent = "tap queued";
+    }
     Serial.printf("[touch][gesture] up x=%d y=%d, duration=%lums, movement=%d -> %s\n",
                   touchX, touchY, (unsigned long)duration, movement,
                   tap ? (detailsOpen ? "ignored (details open)" : "toggle queued") : "no tap");
@@ -415,7 +449,11 @@ static void makeUsageRow(lv_obj_t *parent, uint8_t index, int x, int y, int widt
   lv_obj_set_style_bg_color(paceMarkers[index], C(0xFFFFFF), 0); lv_obj_set_style_bg_opa(paceMarkers[index], LV_OPA_COVER, 0);
   lv_obj_set_style_border_width(paceMarkers[index], 0, 0); lv_obj_set_style_radius(paceMarkers[index], 1, 0); lv_obj_set_style_pad_all(paceMarkers[index], 0, 0);
   lv_obj_clear_flag(paceMarkers[index], LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE); lv_obj_add_flag(paceMarkers[index], LV_OBJ_FLAG_HIDDEN);
-  resetLabels[index] = label(row, "Waiting for usage data", &lv_font_montserrat_12, C(0x929292)); lv_obj_set_pos(resetLabels[index], 0, height - 17);
+  resetLabels[index] = label(row, "Waiting for usage data", &lv_font_montserrat_12, C(0x929292));
+  // Keep the reset text visually attached to its own bar. The remaining row
+  // height becomes a clear gap before the next metric instead of making the
+  // reset look like a subtitle for the row below.
+  lv_obj_set_pos(resetLabels[index], 0, min(31, height - 17));
 }
 
 static void makePaceRow(lv_obj_t *parent, uint8_t provider, int x, int y, int width, int height) {
@@ -450,7 +488,17 @@ static lv_obj_t *makeProviderPanel(const char *title, uint8_t provider, int y, i
   lv_obj_set_style_pad_all(panel, 0, 0); lv_obj_clear_flag(panel, LV_OBJ_FLAG_SCROLLABLE); lv_obj_clear_flag(panel, LV_OBJ_FLAG_CLICKABLE);
   if (flat) { lv_obj_set_style_bg_opa(panel, LV_OPA_TRANSP, 0); lv_obj_set_style_border_width(panel, 0, 0); }
   else panelStyle(panel);
-  lv_obj_t *heading = label(panel, title, &lv_font_montserrat_20, C(0xFFFFFF)); lv_obj_set_pos(heading, innerX, 2);
+  lv_obj_t *providerIcon = lv_img_create(panel);
+  lv_img_set_src(providerIcon, provider == 0 ? &cursorProviderIcon : &codexProviderIcon);
+  lv_obj_set_pos(providerIcon, innerX, 2);
+  lv_obj_clear_flag(providerIcon, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+  // The supplied Cursor artwork is intentionally very dark. A partial white
+  // recolor keeps its shape and shading visible on this dashboard background.
+  if (provider == 0) {
+    lv_obj_set_style_img_recolor(providerIcon, C(0xFFFFFF), 0);
+    lv_obj_set_style_img_recolor_opa(providerIcon, 180, 0);
+  }
+  lv_obj_t *heading = label(panel, title, &lv_font_montserrat_20, C(0xFFFFFF)); lv_obj_set_pos(heading, innerX + 31, 2);
   providerStatusLabels[provider] = label(panel, "WAITING", &lv_font_montserrat_12, C(0x888888)); lv_obj_align(providerStatusLabels[provider], LV_ALIGN_TOP_RIGHT, -innerX, 6);
   lv_obj_t *divider = lv_obj_create(panel); lv_obj_set_size(divider, innerWidth, 1); lv_obj_set_pos(divider, innerX, 28);
   lv_obj_set_style_bg_color(divider, C(0x3A3A3A), 0); lv_obj_set_style_bg_opa(divider, LV_OPA_COVER, 0); lv_obj_set_style_border_width(divider, 0, 0); lv_obj_set_style_pad_all(divider, 0, 0);
@@ -534,6 +582,7 @@ void displayLoop() {
   // tree while LVGL is still reading the GT911 input device.
   if (touchPendingToggle) {
     touchPendingToggle = false;
+    touchToggleEvents++; touchLastEventMs = millis(); touchLastEvent = "view toggled";
     toggleView();
   }
 }
@@ -544,6 +593,43 @@ void displaySetNetwork(const String &text, bool connected) {
   if (!networkLabel) return;
   lv_label_set_text(networkLabel, text.c_str());
   lv_obj_set_style_text_color(networkLabel, C(connected ? 0x45D597 : 0xF2A93B), 0);
+}
+
+TouchDiagnostics displayGetTouchDiagnostics() {
+  TouchDiagnostics diagnostics;
+  diagnostics.controller = touchAddress ? "GT911" : touchPossibleGsl3680 ? "possible GSL3680" : "none";
+  if (touchAddress) {
+    if (touchStateReadErrors > 0 && touchStateReads == 0) diagnostics.status = "GT911 detected, but state reads fail";
+    else if (touchPointFrames > 0) diagnostics.status = "Touch data received";
+    else if (touchReadyFrames > 0) diagnostics.status = "Ready frames received, but no point data";
+    else diagnostics.status = "GT911 detected; no touch frame received yet";
+  } else if (touchPossibleGsl3680) diagnostics.status = "No GT911; possible GSL3680 detected at 0x40";
+  else if (touchBusDevices == "none") diagnostics.status = "No I2C device detected on touch bus";
+  else diagnostics.status = "I2C device found, but no GT911 at 0x5D/0x14";
+  diagnostics.busDevices = touchBusDevices;
+  diagnostics.lastError = touchLastError;
+  diagnostics.lastEvent = touchLastEvent;
+  diagnostics.address = touchAddress;
+  diagnostics.lastState = touchLastState;
+  diagnostics.lastTouchCount = touchLastCount;
+  diagnostics.rawWidth = touchRawWidth; diagnostics.rawHeight = touchRawHeight;
+  diagnostics.rawX = touchRawX; diagnostics.rawY = touchRawY;
+  diagnostics.displayX = touchX; diagnostics.displayY = touchY;
+  diagnostics.callbackCalls = touchCallbackCalls;
+  diagnostics.probeAttempts = touchProbeAttempts;
+  diagnostics.polls = touchPolls;
+  diagnostics.stateReads = touchStateReads;
+  diagnostics.stateReadErrors = touchStateReadErrors;
+  diagnostics.readyFrames = touchReadyFrames;
+  diagnostics.pointFrames = touchPointFrames;
+  diagnostics.acknowledgeErrors = touchAcknowledgeErrors;
+  diagnostics.downEvents = touchDownEvents; diagnostics.upEvents = touchUpEvents;
+  diagnostics.tapEvents = touchTapEvents; diagnostics.toggleEvents = touchToggleEvents;
+  diagnostics.lastEventMs = touchLastEventMs;
+  diagnostics.pressed = touchPressed;
+  diagnostics.possibleGsl3680 = touchPossibleGsl3680;
+  diagnostics.remainingView = availableView;
+  return diagnostics;
 }
 
 void displayUpdate(const UsageSnapshot &codex, const UsageSnapshot &cursor, uint8_t warningPercent, uint8_t criticalPercent) {
