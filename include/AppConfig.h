@@ -22,11 +22,13 @@ struct AppConfig {
   uint8_t criticalPercent = 90;
   bool verifyTls = true;
   uint8_t displayStyle = 0;  // 0 = framed panels, 1 = open/frameless
+  bool displayAvailable = false;
   bool showCursorModels = true;
   bool showCursorOther = true;
   bool showCursorOnDemand = true;
   bool showCursorThirtyMinute = true;
   bool showCodexWeekly = true;
+  bool showCodexThirtyMinute = true;
 };
 
 bool loadConfig(AppConfig &cfg);

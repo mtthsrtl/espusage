@@ -26,16 +26,17 @@ bool loadConfig(AppConfig &c) {
   c.verifyTls = prefs.getBool("tls", true);
   c.displayStyle = prefs.getUChar("ui_style", 0);
   if (c.displayStyle > 1) c.displayStyle = 0;
+  c.displayAvailable = prefs.getBool("ui_remaining", false);
   c.showCursorModels = prefs.getBool("show_cur_main", true);
   c.showCursorOther = prefs.getBool("show_cur_other", true);
   c.showCursorOnDemand = prefs.getBool("show_cur_od", true);
   c.showCursorThirtyMinute = prefs.getBool("show_cur_30m", true);
   uint8_t uiConfigVersion = prefs.getUChar("ui_ver", 0);
   c.showCodexWeekly = prefs.getBool("show_cdx_7d", true);
+  c.showCodexThirtyMinute = prefs.getBool("show_cdx_30m", true);
   prefs.end();
   if (uiConfigVersion < UI_CONFIG_VERSION && prefs.begin("espusage", false)) {
     prefs.remove("show_cdx_5h");
-    prefs.remove("show_cdx_30m");
     prefs.remove("codex_evt_url");
     prefs.putUChar("ui_ver", UI_CONFIG_VERSION);
     prefs.end();
@@ -58,10 +59,12 @@ bool saveConfig(const AppConfig &c) {
   prefs.putUChar("warn_pct", c.warningPercent); prefs.putUChar("crit_pct", c.criticalPercent);
   prefs.putBool("tls", c.verifyTls);
   prefs.putUChar("ui_style", c.displayStyle);
+  prefs.putBool("ui_remaining", c.displayAvailable);
   prefs.putBool("show_cur_main", c.showCursorModels); prefs.putBool("show_cur_other", c.showCursorOther);
   prefs.putBool("show_cur_od", c.showCursorOnDemand); prefs.putBool("show_cur_30m", c.showCursorThirtyMinute);
-  prefs.remove("show_cdx_5h"); prefs.remove("show_cdx_30m"); prefs.remove("codex_evt_url");
-  prefs.putBool("show_cdx_7d", c.showCodexWeekly); prefs.putUChar("ui_ver", UI_CONFIG_VERSION);
+  prefs.remove("show_cdx_5h"); prefs.remove("codex_evt_url");
+  prefs.putBool("show_cdx_7d", c.showCodexWeekly); prefs.putBool("show_cdx_30m", c.showCodexThirtyMinute);
+  prefs.putUChar("ui_ver", UI_CONFIG_VERSION);
   prefs.end();
   return true;
 }

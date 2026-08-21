@@ -26,12 +26,12 @@ static int touchX = 0, touchY = 0;
 
 static lv_obj_t *networkLabel, *modeLabel, *providerStatusLabels[2];
 static lv_obj_t *statusLabels[4], *values[4], *bars[4], *paceMarkers[4], *resetLabels[4], *rows[4];
-static lv_obj_t *paceRows[1], *paceValues[1], *paceMeta[1], *paceColumns[1][6];
-static int barWidths[4], markerY[4], paceChartBaseline[1], paceChartMaxHeight[1];
+static lv_obj_t *paceRows[2], *paceValues[2], *paceMeta[2], *paceColumns[2][6];
+static int barWidths[4], markerY[4], paceChartBaseline[2], paceChartMaxHeight[2];
 static String rowNames[4] = {"CURSOR MODELS","OTHER MODELS","ON DEMAND","WEEKLY LIMIT"};
 static UsageWindow rowData[4];
 static String rowStatus[4], networkAddress;
-static UsageSnapshot latestCursor;
+static UsageSnapshot latestCodex, latestCursor;
 static bool availableView = false;
 static uint8_t warningLevel = 70, criticalLevel = 90;
 
@@ -217,6 +217,12 @@ static String usageState(float usedPercent) {
   return "OK";
 }
 
+static uint8_t validBucketCount(const RecentUsage30m &recent) {
+  uint8_t count = 0;
+  for (const RecentUsageBucket &bucket : recent.buckets) if (bucket.valid) count++;
+  return count;
+}
+
 static void closeModal(lv_event_t *event) {
   lv_obj_t *backdrop = (lv_obj_t *)lv_event_get_user_data(event);
   Serial.println("[touch] Details closed");
@@ -228,7 +234,7 @@ static String standardDetails(uint8_t index) {
   String body;
   if (window.usedPercent < 0) body = "No usage data";
   else {
-    body = "Used: " + String(window.usedPercent, 1) + "%\nAvailable: " + String(100.0f - window.usedPercent, 1) + "%";
+    body = "Used: " + String(window.usedPercent, 1) + "%\nRemaining: " + String(100.0f - window.usedPercent, 1) + "%";
     if (window.elapsedPercent >= 0) {
       body += "\nPeriod elapsed: " + String(window.elapsedPercent, 1) + "%";
       body += "\nPeriod remaining: " + String(100.0f - window.elapsedPercent, 1) + "%";
@@ -253,6 +259,18 @@ static String cursorPaceDetails() {
   return body;
 }
 
+static String codexPaceDetails() {
+  const RecentUsage30m &recent = latestCodex.recent30m;
+  String body = "Weekly change: +" + String(recent.deltaPercent, 2) + " pp\nMeasurements: " + String(recent.samples) +
+                "\nFilled buckets: " + String(validBucketCount(recent)) + "/6\n\n5-minute buckets:";
+  for (uint8_t i = 0; i < 6; ++i) {
+    body += "\n" + String(i + 1) + ": ";
+    body += recent.buckets[i].valid ? "+" + String(recent.buckets[i].deltaPercent, 2) + " pp" : String("no sample");
+  }
+  body += "\n\nStatus: " + (recent.status.length() ? recent.status : String("unavailable"));
+  return body;
+}
+
 static void openDetails(lv_event_t *event) {
   uint8_t index = (uint8_t)(uintptr_t)lv_event_get_user_data(event);
   Serial.printf("[touch] long press -> details=%u\n", index);
@@ -265,10 +283,10 @@ static void openDetails(lv_event_t *event) {
   lv_obj_t *modal = lv_obj_create(backdrop);
   lv_obj_set_size(modal, 438, index < 4 ? 330 : 410); lv_obj_center(modal); panelStyle(modal);
   lv_obj_set_style_pad_all(modal, 20, 0);
-  const char *titleText = index < 4 ? rowNames[index].c_str() : "CURSOR / LAST 30 MIN";
+  const char *titleText = index < 4 ? rowNames[index].c_str() : index == 4 ? "CURSOR / LAST 30 MIN" : "CODEX / LAST 30 MIN";
   lv_obj_t *title = label(modal, titleText, &lv_font_montserrat_20, C(0xF4F4F4));
   lv_obj_align(title, LV_ALIGN_TOP_LEFT, 0, 0);
-  String bodyText = index < 4 ? standardDetails(index) : cursorPaceDetails();
+  String bodyText = index < 4 ? standardDetails(index) : index == 4 ? cursorPaceDetails() : codexPaceDetails();
   lv_obj_t *body = label(modal, bodyText.c_str(), &lv_font_montserrat_14, C(0xB8B8B8));
   lv_obj_set_width(body, 390); lv_label_set_long_mode(body, LV_LABEL_LONG_WRAP); lv_obj_align(body, LV_ALIGN_TOP_LEFT, 0, 42);
   lv_obj_t *close = lv_btn_create(modal);
@@ -308,28 +326,35 @@ static void renderMetric(uint8_t index) {
   lv_label_set_text(resetLabels[index], bottom.c_str());
 }
 
-static void renderPace() {
-  constexpr uint8_t provider = 0;
+static void renderPace(uint8_t provider) {
   if (!paceRows[provider]) return;
-  const RecentUsage30m &recent = latestCursor.recent30m;
+  const RecentUsage30m &recent = provider == 0 ? latestCursor.recent30m : latestCodex.recent30m;
   String valueText, metaText;
-  uint64_t tokens = totalTokens(recent);
-  bool tokenChart = recent.tokenData && tokens > 0;
-  if (!recent.available) valueText = "NO DATA";
-  else if (!recent.calls) valueText = "0 CALLS";
-  else if (recent.tokenData) valueText = formatTokens(tokens) + (recent.tokenizedCalls < recent.calls ? "+ TOK | " : " TOK | ") + String(recent.calls) + " CALLS";
-  else valueText = String(recent.calls) + " CALLS | TOK N/A";
-  metaText = recent.topModel.length() ? recent.topModel : tokenChart ? "TOKENS / 6 x 5 MIN" : "CALLS / 6 x 5 MIN";
+  bool tokenChart = false;
+  if (provider == 0) {
+    uint64_t tokens = totalTokens(recent);
+    tokenChart = recent.tokenData && tokens > 0;
+    if (!recent.available) valueText = "NO DATA";
+    else if (!recent.calls) valueText = "0 CALLS";
+    else if (recent.tokenData) valueText = formatTokens(tokens) + (recent.tokenizedCalls < recent.calls ? "+ TOK | " : " TOK | ") + String(recent.calls) + " CALLS";
+    else valueText = String(recent.calls) + " CALLS | TOK N/A";
+    metaText = recent.topModel.length() ? recent.topModel : tokenChart ? "TOKENS / 6 x 5 MIN" : "CALLS / 6 x 5 MIN";
+  } else {
+    if (!recent.available) valueText = "NO DATA";
+    else if (!recent.ready) valueText = "COLLECTING 1/2";
+    else valueText = "+" + String(recent.deltaPercent, 2) + " PP";
+    metaText = "WEEKLY CHANGE / 6 x 5 MIN";
+  }
   lv_label_set_text(paceValues[provider], valueText.c_str());
   lv_label_set_text(paceMeta[provider], metaText.c_str());
 
   double maximum = 0;
   for (uint8_t i = 0; i < 6; ++i) {
-    double amount = tokenChart ? (double)recent.buckets[i].tokens : recent.buckets[i].calls;
+    double amount = provider == 0 ? (tokenChart ? (double)recent.buckets[i].tokens : recent.buckets[i].calls) : recent.buckets[i].deltaPercent;
     if (recent.buckets[i].valid && amount > maximum) maximum = amount;
   }
   for (uint8_t i = 0; i < 6; ++i) {
-    double amount = tokenChart ? (double)recent.buckets[i].tokens : recent.buckets[i].calls;
+    double amount = provider == 0 ? (tokenChart ? (double)recent.buckets[i].tokens : recent.buckets[i].calls) : recent.buckets[i].deltaPercent;
     int height = !recent.buckets[i].valid ? 2 : maximum <= 0 || amount <= 0 ? 2 : 2 + (int)(paceChartMaxHeight[provider] * amount / maximum);
     lv_obj_set_height(paceColumns[provider][i], height);
     lv_obj_set_y(paceColumns[provider][i], paceChartBaseline[provider] - height);
@@ -338,15 +363,15 @@ static void renderPace() {
 }
 
 static void renderAll() {
-  lv_label_set_text(modeLabel, availableView ? "AVAILABLE" : "USED");
+  lv_label_set_text(modeLabel, availableView ? "REMAINING" : "USED");
   for (uint8_t i = 0; i < 4; ++i) renderMetric(i);
-  renderPace();
+  renderPace(0); renderPace(1);
   lv_obj_invalidate(lv_scr_act()); lv_refr_now(nullptr);
 }
 
 static void toggleView(lv_event_t *) {
   availableView = !availableView;
-  Serial.printf("[touch] short press -> view=%s\n", availableView ? "available" : "used");
+  Serial.printf("[touch] short press -> view=%s\n", availableView ? "remaining" : "used");
   renderAll();
 }
 
@@ -377,18 +402,17 @@ static void makeUsageRow(lv_obj_t *parent, uint8_t index, int x, int y, int widt
   resetLabels[index] = label(row, "Waiting for usage data", &lv_font_montserrat_12, C(0x929292)); lv_obj_set_pos(resetLabels[index], 0, height - 17);
 }
 
-static void makePaceRow(lv_obj_t *parent, int x, int y, int width, int height) {
-  constexpr uint8_t provider = 0;
+static void makePaceRow(lv_obj_t *parent, uint8_t provider, int x, int y, int width, int height) {
   lv_obj_t *row = lv_obj_create(parent);
   lv_obj_set_size(row, width, height); lv_obj_set_pos(row, x, y);
   lv_obj_set_style_bg_opa(row, LV_OPA_TRANSP, 0); lv_obj_set_style_border_width(row, 0, 0); lv_obj_set_style_pad_all(row, 0, 0);
-  lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE); paceRows[provider] = row; addTouchCallbacks(row, 4);
+  lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE); paceRows[provider] = row; addTouchCallbacks(row, provider == 0 ? 4 : 5);
   lv_obj_t *topLine = lv_obj_create(row); lv_obj_set_size(topLine, width, 1); lv_obj_set_pos(topLine, 0, 0);
   lv_obj_set_style_bg_color(topLine, C(0x242424), 0); lv_obj_set_style_bg_opa(topLine, LV_OPA_COVER, 0); lv_obj_set_style_border_width(topLine, 0, 0); lv_obj_set_style_pad_all(topLine, 0, 0);
   lv_obj_clear_flag(topLine, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
   lv_obj_t *title = label(row, "LAST 30 MIN", &lv_font_montserrat_14, C(0xF2F2F2)); lv_obj_set_pos(title, 0, 5);
   paceValues[provider] = label(row, "WAITING", &lv_font_montserrat_14, C(0xF2F2F2)); lv_obj_align(paceValues[provider], LV_ALIGN_TOP_RIGHT, 0, 5);
-  paceMeta[provider] = label(row, "TOKENS / 6 x 5 MIN", &lv_font_montserrat_12, C(0x929292));
+  paceMeta[provider] = label(row, provider == 0 ? "TOKENS / 6 x 5 MIN" : "WEEKLY CHANGE / 6 x 5 MIN", &lv_font_montserrat_12, C(0x929292));
   lv_obj_set_pos(paceMeta[provider], 0, height - 18);
   int chartWidth = 142, gap = 4, columnWidth = (chartWidth - gap * 5) / 6, chartX = width - chartWidth;
   paceChartBaseline[provider] = height - 6;
@@ -396,7 +420,7 @@ static void makePaceRow(lv_obj_t *parent, int x, int y, int width, int height) {
   for (uint8_t i = 0; i < 6; ++i) {
     paceColumns[provider][i] = lv_obj_create(row);
     lv_obj_set_size(paceColumns[provider][i], columnWidth, 2); lv_obj_set_pos(paceColumns[provider][i], chartX + i * (columnWidth + gap), paceChartBaseline[provider] - 2);
-    lv_obj_set_style_bg_color(paceColumns[provider][i], C(0x35D078), 0);
+    lv_obj_set_style_bg_color(paceColumns[provider][i], C(provider == 0 ? 0x35D078 : 0x8295A8), 0);
     lv_obj_set_style_bg_opa(paceColumns[provider][i], LV_OPA_20, 0); lv_obj_set_style_border_width(paceColumns[provider][i], 0, 0);
     lv_obj_set_style_radius(paceColumns[provider][i], 1, 0); lv_obj_set_style_pad_all(paceColumns[provider][i], 0, 0);
     lv_obj_clear_flag(paceColumns[provider][i], LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
@@ -419,6 +443,7 @@ static lv_obj_t *makeProviderPanel(const char *title, uint8_t provider, int y, i
 }
 
 void displayBegin(const AppConfig &config) {
+  availableView = config.displayAvailable;
   // Bring up the board's independent GT911 bus before the RGB peripheral.
   // This also gives a useful boot-time probe even if LVGL never sees a press.
   touchBegin();
@@ -441,8 +466,9 @@ void displayBegin(const AppConfig &config) {
   uint8_t cursorCount = visible[0] + visible[1] + visible[2];
   uint8_t codexCount = visible[3];
   bool cursorPaceVisible = config.showCursorThirtyMinute;
+  bool codexPaceVisible = config.showCodexThirtyMinute;
   uint8_t cursorUnits = cursorCount + (cursorPaceVisible ? 1 : 0);
-  uint8_t codexUnits = codexCount;
+  uint8_t codexUnits = codexCount + (codexPaceVisible ? 1 : 0);
   uint8_t panelCount = (cursorUnits ? 1 : 0) + (codexUnits ? 1 : 0);
   uint8_t totalUnits = cursorUnits + codexUnits;
   constexpr int panelHeader = 34, panelGap = 4, dashboardHeight = 434;
@@ -467,16 +493,17 @@ void displayBegin(const AppConfig &config) {
       int height = unitHeight + (!cursorPaceVisible && made == cursorCount ? cursorExtra : 0);
       makeUsageRow(cursorPanel, i, innerX, rowY, innerWidth, height); rowY += height;
     }
-    if (cursorPaceVisible) makePaceRow(cursorPanel, innerX, rowY, innerWidth, unitHeight + cursorExtra);
+    if (cursorPaceVisible) makePaceRow(cursorPanel, 0, innerX, rowY, innerWidth, unitHeight + cursorExtra);
     y += cursorHeight + 4;
   }
   if (codexUnits) {
     lv_obj_t *codexPanel = makeProviderPanel("CODEX", 1, y, codexHeight, flat, innerX, innerWidth);
     int rowY = 34;
     if (visible[3]) {
-      int height = unitHeight + max(0, remainder);
+      int height = unitHeight + (!codexPaceVisible ? max(0, remainder) : 0);
       makeUsageRow(codexPanel, 3, innerX, rowY, innerWidth, height); rowY += height;
     }
+    if (codexPaceVisible) makePaceRow(codexPanel, 1, innerX, rowY, innerWidth, unitHeight + max(0, remainder));
   }
   Serial.printf("[display] Layout: Cursor units=%u, Codex units=%u, row=%dpx, bottom=%d\n",
                 cursorUnits, codexUnits, unitHeight, y + codexHeight);
@@ -494,7 +521,7 @@ void displaySetNetwork(const String &text, bool connected) {
 }
 
 void displayUpdate(const UsageSnapshot &codex, const UsageSnapshot &cursor, uint8_t warningPercent, uint8_t criticalPercent) {
-  latestCursor = cursor; warningLevel = warningPercent; criticalLevel = criticalPercent;
+  latestCodex = codex; latestCursor = cursor; warningLevel = warningPercent; criticalLevel = criticalPercent;
   rowData[0] = cursor.primary; rowData[1] = cursor.secondary; rowData[2] = cursor.tertiary;
   rowData[3] = codex.secondary;
   for (uint8_t i = 0; i < 3; ++i) rowStatus[i] = cursor.status;
@@ -509,6 +536,6 @@ void displayUpdate(const UsageSnapshot &codex, const UsageSnapshot &cursor, uint
   }
   renderAll();
   Serial.printf("[display] view=%s, Cursor %.1f / %.1f / %.1f, Codex weekly %.1f\n",
-                availableView ? "available" : "used", cursor.primary.usedPercent, cursor.secondary.usedPercent,
+                availableView ? "remaining" : "used", cursor.primary.usedPercent, cursor.secondary.usedPercent,
                 cursor.tertiary.usedPercent, codex.secondary.usedPercent);
 }
