@@ -5,4 +5,5 @@ secrets.*
 credentials.*
 .env
 firmware.bin
+platformio.ini
 
