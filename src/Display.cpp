@@ -23,6 +23,9 @@ static uint32_t touchLastPollMs = 0, touchLastFrameMs = 0, touchLastProbeMs = 0;
 static uint8_t touchReadErrors = 0;
 static bool touchPressed = false;
 static int touchX = 0, touchY = 0;
+static bool touchWasPressed = false, touchPendingToggle = false, detailsOpen = false;
+static uint32_t touchDownMs = 0;
+static int touchDownX = 0, touchDownY = 0;
 
 static lv_obj_t *networkLabel, *modeLabel, *providerStatusLabels[2];
 static lv_obj_t *statusLabels[4], *values[4], *bars[4], *paceMarkers[4], *resetLabels[4], *rows[4];
@@ -119,10 +122,10 @@ static void touchBegin() {
   Wire.setTimeOut(50);
   touchLastProbeMs = millis();
   if (!touchProbe()) touchScanBus();
+  Serial.println("[touch][gesture] Raw tap detection enabled (35-650ms)");
 }
 
 static void readTouch(lv_indev_drv_t *, lv_indev_data_t *data) {
-  static bool wasPressed = false;
   uint32_t now = millis();
   if (!touchAddress && now - touchLastProbeMs >= 2000) {
     touchLastProbeMs = now;
@@ -142,6 +145,10 @@ static void readTouch(lv_indev_drv_t *, lv_indev_data_t *data) {
       touchReadErrors = 0;
       uint8_t count = state & 0x07;
       if (state & 0x80) {
+        // Match the proven ESPHome GT911 sequence used by EspControl: clear
+        // the ready flag immediately, then fetch the current point buffer.
+        if (!touchWriteRegister(GT911_TOUCH_STATE, 0))
+          Serial.println("[touch][gt911] Could not acknowledge touch frame");
         touchLastFrameMs = now;
         if (count > 0 && count <= 5) {
           uint8_t points[41] = {};
@@ -156,19 +163,26 @@ static void readTouch(lv_indev_drv_t *, lv_indev_data_t *data) {
             touchPressed = true;
           }
         } else touchPressed = false;
-        // Acknowledge only after the complete point frame has been consumed.
-        // Clearing it before reading 0x814F can race the controller update.
-        if (!touchWriteRegister(GT911_TOUCH_STATE, 0))
-          Serial.println("[touch][gt911] Could not acknowledge touch frame");
       } else if (touchPressed && now - touchLastFrameMs > 120) touchPressed = false;
     }
   }
   data->state = touchPressed ? LV_INDEV_STATE_PR : LV_INDEV_STATE_REL;
   data->point.x = touchX;
   data->point.y = touchY;
-  if (touchPressed && !wasPressed) Serial.printf("[touch] down x=%d y=%d\n", touchX, touchY);
-  if (!touchPressed && wasPressed) Serial.printf("[touch] up x=%d y=%d\n", touchX, touchY);
-  wasPressed = touchPressed;
+  if (touchPressed && !touchWasPressed) {
+    touchDownMs = now; touchDownX = touchX; touchDownY = touchY;
+    Serial.printf("[touch][gesture] down x=%d y=%d\n", touchX, touchY);
+  }
+  if (!touchPressed && touchWasPressed) {
+    uint32_t duration = now - touchDownMs;
+    int movement = abs(touchX - touchDownX) + abs(touchY - touchDownY);
+    bool tap = duration >= 35 && duration <= 650 && movement <= 80;
+    if (tap && !detailsOpen) touchPendingToggle = true;
+    Serial.printf("[touch][gesture] up x=%d y=%d, duration=%lums, movement=%d -> %s\n",
+                  touchX, touchY, (unsigned long)duration, movement,
+                  tap ? (detailsOpen ? "ignored (details open)" : "toggle queued") : "no tap");
+  }
+  touchWasPressed = touchPressed;
 }
 
 static void panelStyle(lv_obj_t *object) {
@@ -226,6 +240,7 @@ static uint8_t validBucketCount(const RecentUsage30m &recent) {
 static void closeModal(lv_event_t *event) {
   lv_obj_t *backdrop = (lv_obj_t *)lv_event_get_user_data(event);
   Serial.println("[touch] Details closed");
+  detailsOpen = false;
   lv_obj_del(backdrop);
 }
 
@@ -272,6 +287,8 @@ static String codexPaceDetails() {
 }
 
 static void openDetails(lv_event_t *event) {
+  if (detailsOpen) return;
+  detailsOpen = true;
   uint8_t index = (uint8_t)(uintptr_t)lv_event_get_user_data(event);
   Serial.printf("[touch] long press -> details=%u\n", index);
   lv_obj_t *backdrop = lv_obj_create(lv_scr_act());
@@ -369,15 +386,14 @@ static void renderAll() {
   lv_obj_invalidate(lv_scr_act()); lv_refr_now(nullptr);
 }
 
-static void toggleView(lv_event_t *) {
+static void toggleView() {
   availableView = !availableView;
-  Serial.printf("[touch] short press -> view=%s\n", availableView ? "remaining" : "used");
+  Serial.printf("[touch][gesture] tap -> view=%s\n", availableView ? "remaining" : "used");
   renderAll();
 }
 
 static void addTouchCallbacks(lv_obj_t *object, uint8_t detailIndex) {
   lv_obj_add_flag(object, LV_OBJ_FLAG_CLICKABLE);
-  lv_obj_add_event_cb(object, toggleView, LV_EVENT_SHORT_CLICKED, nullptr);
   lv_obj_add_event_cb(object, openDetails, LV_EVENT_LONG_PRESSED, (void *)(uintptr_t)detailIndex);
 }
 
@@ -456,7 +472,7 @@ void displayBegin(const AppConfig &config) {
   inputDriver.read_cb = readTouch; inputDriver.long_press_time = 900; lv_indev_drv_register(&inputDriver);
 
   lv_obj_set_style_bg_color(lv_scr_act(), C(0x000000), 0); lv_obj_set_style_bg_opa(lv_scr_act(), LV_OPA_COVER, 0);
-  lv_obj_add_flag(lv_scr_act(), LV_OBJ_FLAG_CLICKABLE); lv_obj_add_event_cb(lv_scr_act(), toggleView, LV_EVENT_SHORT_CLICKED, nullptr);
+  lv_obj_add_flag(lv_scr_act(), LV_OBJ_FLAG_CLICKABLE);
   lv_obj_t *title = label(lv_scr_act(), "AI USAGE", &lv_font_montserrat_20, C(0xFFFFFF)); lv_obj_set_pos(title, 16, 5);
   modeLabel = label(lv_scr_act(), "USED", &lv_font_montserrat_12, C(0xFFFFFF)); lv_obj_align(modeLabel, LV_ALIGN_TOP_MID, 0, 11);
   networkLabel = label(lv_scr_act(), "STARTING", &lv_font_montserrat_12, C(0xF2A93B)); lv_obj_align(networkLabel, LV_ALIGN_TOP_RIGHT, -16, 11);
@@ -511,7 +527,16 @@ void displayBegin(const AppConfig &config) {
   renderAll();
 }
 
-void displayLoop() { lv_timer_handler(); }
+void displayLoop() {
+  lv_timer_handler();
+  // Process the raw gesture only after LVGL has finished its input callback.
+  // This avoids relying on object hit-testing and avoids changing the object
+  // tree while LVGL is still reading the GT911 input device.
+  if (touchPendingToggle) {
+    touchPendingToggle = false;
+    toggleView();
+  }
+}
 void displaySetBrightness(uint8_t value) { digitalWrite(38, value ? HIGH : LOW); }
 
 void displaySetNetwork(const String &text, bool connected) {
