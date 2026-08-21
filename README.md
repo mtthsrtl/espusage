@@ -17,6 +17,8 @@ Native, standalone firmware for the 4-inch GUITION ESP32-S3 4848S040 (480×480).
 
 The display pinout is based on the working [EspControl 4848S040 hardware definition](https://github.com/jtenniswood/espcontrol/blob/main/devices/guition-esp32-s3-4848s040/device/device.yaml): RGB data pins, GPIO 39/48/47 panel control, GPIO 18/17/16/21 timing, GPIO 19/45 GT911, and GPIO 38 backlight. The Arduino_GFX timings use the field-tested 10/8/50 horizontal and 10/8/20 vertical porch/pulse values.
 
+Touch follows the same board-specific setup as EspControl: GT911 is polled every 16 ms on SDA GPIO19/SCL GPIO45, with no reset or interrupt GPIO assigned. The firmware probes both supported I²C addresses (`0x5D` and `0x14`) and retries automatically after communication loss. GPIO41/42 are not touch pins on this board.
+
 ## Important: first installation from EspControl
 
 Do **not** install this firmware through EspControl's existing web updater. EspControl and ESP Usage can use different partition tables and OTA metadata. An application-only upload may boot-loop or leave no valid fallback image. The first switch must be done once over USB-C; subsequent ESP Usage updates can use the built-in web updater.
@@ -98,7 +100,7 @@ This direct route is **undocumented and unsupported** and may stop working. As a
 
 The adapter URL and optional bearer token are runtime-only NVS values.
 
-The Codex **Last 30 min** row is calculated locally from changes to the weekly percentage. It shows six 5-minute buckets and their total as percentage points (`+1.80 PP`). The history intentionally remains in RAM to avoid needless flash writes, so it starts at `COLLECTING` after every reboot. A detected weekly-limit reset clears the collection automatically. The Codex 5-hour row defaults to disabled after a one-time display-settings migration and can be enabled again in the web UI.
+The Codex **Last 30 min** row is calculated locally from changes to the weekly percentage. It shows six 5-minute buckets and their total as percentage points (`+1.80 PP`). The history intentionally remains in RAM to avoid needless flash writes, so the first successful request establishes a `COLLECTING 1/2` baseline. The value is shown after the second successful measurement while the six historical buckets continue filling. A detected weekly-limit reset clears the collection automatically. The Codex 5-hour row defaults to disabled after a one-time display-settings migration and can be enabled again in the web UI.
 
 The firmware deliberately does not use OpenAI's [organization Usage API](https://developers.openai.com/api/reference/resources/admin/subresources/organization/subresources/usage). That API requires an organization admin key and measures OpenAI API organization usage; it does not represent the consumer Codex/ChatGPT subscription gauges shown here.
 
@@ -133,7 +135,7 @@ In `USED` mode a normal bar fills from the left with the consumed percentage. In
 & "$env:USERPROFILE\.platformio\penv\Scripts\pio.exe" run -e guition-4848s040
 ```
 
-Tested with PlatformIO `espressif32@6.12.0`, Arduino-ESP32 2.0.17, Arduino_GFX 1.6.0, LVGL 8.4.0, TAMC_GT911 1.0.2, and ArduinoJson 7.4.2.
+Tested with PlatformIO `espressif32@6.12.0`, Arduino-ESP32 2.0.17, Arduino_GFX 1.6.0, LVGL 8.4.0, and ArduinoJson 7.4.2. GT911 communication is implemented directly over Arduino `Wire` to match this board's pinless reset/interrupt configuration.
 
 ## HTTP endpoints
 

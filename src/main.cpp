@@ -14,6 +14,7 @@ struct CodexPaceBucket { uint32_t slot = 0; float delta = 0; bool valid = false;
 static CodexPaceBucket codexPace[6];
 static bool codexLastValid = false;
 static float codexLastWeekly = -1;
+static uint16_t codexSampleCount = 0;
 
 static void clearCodexPace() {
   for (CodexPaceBucket &bucket : codexPace) bucket = CodexPaceBucket();
@@ -32,12 +33,16 @@ static void updateCodexPace(UsageSnapshot &snapshot) {
   bool resetDetected = codexLastValid && weekly + 0.05f < codexLastWeekly;
   if (resetDetected) {
     clearCodexPace();
+    codexSampleCount = 1;
     CodexPaceBucket &resetBucket = codexPace[slot % 6];
     resetBucket.slot = slot; resetBucket.valid = true;
     Serial.printf("[usage][codex][30m] Weekly reset detected: %.1f -> %.1f\n", codexLastWeekly, weekly);
-  } else if (codexLastValid) {
-    float delta = weekly - codexLastWeekly;
-    if (delta > 0) codexPace[slot % 6].delta += delta;
+  } else {
+    if (codexSampleCount < UINT16_MAX) codexSampleCount++;
+    if (codexLastValid) {
+      float delta = weekly - codexLastWeekly;
+      if (delta > 0) codexPace[slot % 6].delta += delta;
+    }
   }
   codexLastWeekly = weekly; codexLastValid = true;
 
@@ -54,10 +59,13 @@ static void updateCodexPace(UsageSnapshot &snapshot) {
       validCount++;
     }
   }
-  recent.ready = validCount == 6;
-  recent.status = resetDetected ? "reset detected" : recent.ready ? "online" : "collecting " + String(validCount) + "/6";
-  Serial.printf("[usage][codex][30m] delta=%.2f pp, samples=%u/6, status=%s\n",
-                recent.deltaPercent, validCount, recent.status.c_str());
+  recent.samples = codexSampleCount;
+  recent.ready = codexSampleCount >= 2;
+  recent.status = resetDetected ? "reset detected; collecting baseline" : recent.ready
+                    ? validCount == 6 ? "online" : "online; " + String(validCount) + "/6 buckets"
+                    : "collecting baseline";
+  Serial.printf("[usage][codex][30m] delta=%.2f pp, measurements=%u, buckets=%u/6, status=%s\n",
+                recent.deltaPercent, recent.samples, validCount, recent.status.c_str());
 }
 static void startRecoveryAp(const char *name){
   WiFi.disconnect(false,false);delay(150);WiFi.mode(WIFI_AP_STA);bool ok=WiFi.softAP(name);

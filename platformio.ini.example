@@ -25,6 +25,5 @@ build_flags =
 lib_deps =
   moononournation/GFX Library for Arduino@1.6.0
   lvgl/lvgl@8.4.0
-  tamctec/TAMC_GT911@1.0.2
   bblanchon/ArduinoJson@7.4.2
 
