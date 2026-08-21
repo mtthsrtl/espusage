@@ -46,4 +46,3 @@ void displayUpdate(const UsageSnapshot &codex, const UsageSnapshot &cursor, uint
 void displaySetNetwork(const String &text, bool connected);
 TouchDiagnostics displayGetTouchDiagnostics();
 
-
