@@ -17,12 +17,12 @@ static lv_color_t C(uint32_t value){return lv_color_hex(value);}
 static lv_obj_t *makeLabel(lv_obj_t *parent,const char *text,const lv_font_t *font,lv_color_t color){lv_obj_t *o=lv_label_create(parent);lv_label_set_text(o,text);lv_obj_set_style_text_font(o,font,0);lv_obj_set_style_text_color(o,color,0);return o;}
 static void flush(lv_disp_drv_t *d,const lv_area_t *a,lv_color_t *p){gfx->draw16bitRGBBitmap(a->x1,a->y1,(uint16_t*)&p->full,a->x2-a->x1+1,a->y2-a->y1+1);lv_disp_flush_ready(d);}
 static void readTouch(lv_indev_drv_t*,lv_indev_data_t *data){touch.read();if(touch.isTouched&&touch.touches){data->state=LV_INDEV_STATE_PR;data->point.x=479-touch.points[0].x;data->point.y=479-touch.points[0].y;}else data->state=LV_INDEV_STATE_REL;}
-static void cardStyle(lv_obj_t *o){lv_obj_set_style_bg_color(o,C(0x131820),0);lv_obj_set_style_bg_opa(o,LV_OPA_COVER,0);lv_obj_set_style_border_width(o,1,0);lv_obj_set_style_border_color(o,C(0x2A323D),0);lv_obj_set_style_radius(o,18,0);lv_obj_set_style_pad_all(o,18,0);lv_obj_clear_flag(o,LV_OBJ_FLAG_SCROLLABLE);}
+static void cardStyle(lv_obj_t *o){lv_obj_set_style_bg_color(o,C(0x101010),0);lv_obj_set_style_bg_opa(o,LV_OPA_COVER,0);lv_obj_set_style_border_width(o,1,0);lv_obj_set_style_border_color(o,C(0x303030),0);lv_obj_set_style_radius(o,18,0);lv_obj_set_style_pad_all(o,18,0);lv_obj_clear_flag(o,LV_OBJ_FLAG_SCROLLABLE);}
 
 static void closeModal(lv_event_t *e){lv_obj_del((lv_obj_t*)lv_event_get_user_data(e));}
 static void openDetails(lv_event_t *e){
   int i=(int)(intptr_t)lv_event_get_user_data(e);UsageSnapshot &s=snapshots[i];
-  lv_obj_t *m=lv_obj_create(lv_scr_act());lv_obj_set_size(m,430,390);lv_obj_center(m);cardStyle(m);lv_obj_set_style_bg_color(m,C(0x11161D),0);
+  lv_obj_t *m=lv_obj_create(lv_scr_act());lv_obj_set_size(m,430,390);lv_obj_center(m);cardStyle(m);lv_obj_set_style_bg_color(m,C(0x0D0D0D),0);
   lv_obj_t *t=makeLabel(m,(s.provider+" DETAILS").c_str(),&lv_font_montserrat_24,C(0xF4F7FA));lv_obj_align(t,LV_ALIGN_TOP_LEFT,2,2);
   String body="Status  "+s.status+"\nPlan  "+(s.plan.length()?s.plan:"—")+"\n\n"+s.primary.label+"  "+(s.primary.usedPercent<0?"—":String(s.primary.usedPercent,1)+"%")+"\n"+s.primary.resetText+"\n\n"+s.secondary.label+"  "+(s.secondary.usedPercent<0?"—":String(s.secondary.usedPercent,1)+"%")+"\n"+s.secondary.resetText;
   lv_obj_t *b=makeLabel(m,body.c_str(),&lv_font_montserrat_16,C(0xAEB8C5));lv_obj_set_width(b,390);lv_obj_align(b,LV_ALIGN_TOP_LEFT,2,58);
@@ -38,11 +38,11 @@ static void makeUsageCard(int i,int y,const char *provider,const char *window){
   resetLabels[i]=makeLabel(cards[i],"Waiting for usage data",&lv_font_montserrat_12,C(0x8893A0));lv_obj_align(resetLabels[i],LV_ALIGN_BOTTOM_LEFT,0,1);
 }
 void displayBegin(){
-  pinMode(38,OUTPUT);digitalWrite(38,HIGH);gfx->begin(12000000);gfx->fillScreen(BLACK);touch.begin();touch.setRotation(ROTATION_NORMAL);
+  pinMode(38,OUTPUT);digitalWrite(38,HIGH);gfx->begin(12000000);bus->beginWrite();bus->writeCommand(0x20);bus->endWrite();gfx->fillScreen(BLACK);touch.begin();touch.setRotation(ROTATION_NORMAL);
   lv_init();drawMemory=(lv_color_t*)heap_caps_malloc(480*32*sizeof(lv_color_t),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);lv_disp_draw_buf_init(&drawBuf,drawMemory,nullptr,480*32);
   static lv_disp_drv_t dd;lv_disp_drv_init(&dd);dd.hor_res=480;dd.ver_res=480;dd.flush_cb=flush;dd.draw_buf=&drawBuf;lv_disp_drv_register(&dd);
   static lv_indev_drv_t id;lv_indev_drv_init(&id);id.type=LV_INDEV_TYPE_POINTER;id.read_cb=readTouch;lv_indev_drv_register(&id);
-  lv_obj_set_style_bg_color(lv_scr_act(),C(0x090C11),0);lv_obj_set_style_bg_opa(lv_scr_act(),LV_OPA_COVER,0);
+  lv_obj_set_style_bg_color(lv_scr_act(),C(0x000000),0);lv_obj_set_style_bg_opa(lv_scr_act(),LV_OPA_COVER,0);
   lv_obj_t *title=makeLabel(lv_scr_act(),"AI USAGE",&lv_font_montserrat_24,C(0xF3F6F9));lv_obj_set_pos(title,22,17);
   networkLabel=makeLabel(lv_scr_act(),"STARTING",&lv_font_montserrat_12,C(0xF2A93B));lv_obj_align(networkLabel,LV_ALIGN_TOP_RIGHT,-22,25);
   makeUsageCard(0,62,"CODEX","PRIMARY WINDOW");makeUsageCard(1,242,"CURSOR","MONTHLY USAGE");
