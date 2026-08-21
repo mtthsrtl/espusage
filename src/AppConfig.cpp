@@ -23,6 +23,8 @@ bool loadConfig(AppConfig &c) {
   c.warningPercent = prefs.getUChar("warn_pct", 70);
   c.criticalPercent = prefs.getUChar("crit_pct", 90);
   c.verifyTls = prefs.getBool("tls", true);
+  c.displayStyle = prefs.getUChar("ui_style", 0);
+  if (c.displayStyle > 1) c.displayStyle = 0;
   c.showCursorModels = prefs.getBool("show_cur_main", true);
   c.showCursorOther = prefs.getBool("show_cur_other", true);
   c.showCursorOnDemand = prefs.getBool("show_cur_od", true);
@@ -45,6 +47,7 @@ bool saveConfig(const AppConfig &c) {
   prefs.putUChar("bright", c.brightness); prefs.putUShort("refresh", c.refreshMinutes);
   prefs.putUChar("warn_pct", c.warningPercent); prefs.putUChar("crit_pct", c.criticalPercent);
   prefs.putBool("tls", c.verifyTls);
+  prefs.putUChar("ui_style", c.displayStyle);
   prefs.putBool("show_cur_main", c.showCursorModels); prefs.putBool("show_cur_other", c.showCursorOther);
   prefs.putBool("show_cur_od", c.showCursorOnDemand); prefs.putBool("show_cdx_5h", c.showCodexFiveHour);
   prefs.putBool("show_cdx_7d", c.showCodexWeekly);

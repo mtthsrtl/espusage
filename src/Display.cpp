@@ -10,6 +10,7 @@ static Arduino_RGB_Display *gfx=new Arduino_RGB_Display(480,480,rgb,0,true,bus,G
 static TAMC_GT911 touch(19,45,41,42,480,480);
 static lv_disp_draw_buf_t drawBuf; static lv_color_t *drawMemory;
 static lv_obj_t *networkLabel,*statusLabels[5],*values[5],*bars[5],*paceMarkers[5],*resetLabels[5],*rows[5];
+static int barWidths[5],markerY[5];
 static String rowNames[5]={"CURSOR MODELS","OTHER MODELS","ON DEMAND","5-HOUR LIMIT","WEEKLY LIMIT"};
 static UsageWindow rowData[5]; static String rowStatus[5]; static String networkAddress;
 
@@ -27,19 +28,22 @@ static void details(lv_event_t *e){
   lv_obj_t *b=label(m,body.c_str(),&lv_font_montserrat_16,C(0xB8B8B8));lv_obj_set_width(b,380);lv_obj_align(b,LV_ALIGN_TOP_LEFT,0,55);
   lv_obj_t *x=lv_btn_create(m);lv_obj_set_size(x,110,44);lv_obj_align(x,LV_ALIGN_BOTTOM_RIGHT,0,0);lv_obj_set_style_bg_color(x,C(0x252525),0);lv_obj_t *xl=label(x,"CLOSE",&lv_font_montserrat_14,C(0xFFFFFF));lv_obj_center(xl);lv_obj_add_event_cb(x,closeModal,LV_EVENT_CLICKED,m);
 }
-static void makeUsageRow(lv_obj_t *parent,int i,int y){
-  lv_obj_t *row=lv_obj_create(parent);lv_obj_set_size(row,410,50);lv_obj_set_pos(row,0,y);lv_obj_set_style_bg_opa(row,LV_OPA_TRANSP,0);lv_obj_set_style_border_width(row,0,0);lv_obj_set_style_pad_all(row,0,0);lv_obj_clear_flag(row,LV_OBJ_FLAG_SCROLLABLE);lv_obj_add_flag(row,LV_OBJ_FLAG_CLICKABLE);lv_obj_add_event_cb(row,details,LV_EVENT_CLICKED,(void*)(intptr_t)i);
+static void makeUsageRow(lv_obj_t *parent,int i,int y,bool openStyle){
+  int width=openStyle?448:410,rowHeight=openStyle?56:50,barY=openStyle?25:20,barHeight=openStyle?9:7,resetY=openStyle?39:31;
+  barWidths[i]=width;markerY[i]=barY-2;
+  lv_obj_t *row=lv_obj_create(parent);lv_obj_set_size(row,width,rowHeight);lv_obj_set_pos(row,0,y);lv_obj_set_style_bg_opa(row,LV_OPA_TRANSP,0);lv_obj_set_style_border_width(row,0,0);lv_obj_set_style_pad_all(row,0,0);lv_obj_clear_flag(row,LV_OBJ_FLAG_SCROLLABLE);lv_obj_add_flag(row,LV_OBJ_FLAG_CLICKABLE);lv_obj_add_event_cb(row,details,LV_EVENT_CLICKED,(void*)(intptr_t)i);
   rows[i]=row;
-  lv_obj_t *n=label(row,rowNames[i].c_str(),&lv_font_montserrat_12,C(0xF2F2F2));lv_obj_set_pos(n,0,0);
+  lv_obj_t *n=label(row,rowNames[i].c_str(),openStyle?&lv_font_montserrat_16:&lv_font_montserrat_12,C(0xF2F2F2));lv_obj_set_pos(n,0,0);
   statusLabels[i]=label(row,"WAITING",&lv_font_montserrat_12,C(0x888888));lv_obj_align(statusLabels[i],LV_ALIGN_TOP_RIGHT,-62,0);
-  values[i]=label(row,"--%",&lv_font_montserrat_16,C(0xF2F2F2));lv_obj_align(values[i],LV_ALIGN_TOP_RIGHT,0,0);
-  bars[i]=lv_bar_create(row);lv_obj_set_size(bars[i],410,7);lv_obj_set_pos(bars[i],0,20);lv_bar_set_range(bars[i],0,100);lv_obj_set_style_bg_color(bars[i],C(0x282828),LV_PART_MAIN);lv_obj_set_style_bg_opa(bars[i],LV_OPA_COVER,LV_PART_MAIN);lv_obj_set_style_radius(bars[i],4,LV_PART_MAIN);lv_obj_set_style_radius(bars[i],4,LV_PART_INDICATOR);
-  paceMarkers[i]=lv_obj_create(row);lv_obj_set_size(paceMarkers[i],3,11);lv_obj_set_pos(paceMarkers[i],0,18);lv_obj_set_style_bg_color(paceMarkers[i],C(0xFFFFFF),0);lv_obj_set_style_bg_opa(paceMarkers[i],LV_OPA_COVER,0);lv_obj_set_style_border_width(paceMarkers[i],0,0);lv_obj_set_style_radius(paceMarkers[i],1,0);lv_obj_set_style_pad_all(paceMarkers[i],0,0);lv_obj_clear_flag(paceMarkers[i],LV_OBJ_FLAG_SCROLLABLE);lv_obj_add_flag(paceMarkers[i],LV_OBJ_FLAG_HIDDEN);
-  resetLabels[i]=label(row,"Waiting for usage data",&lv_font_montserrat_12,C(0x929292));lv_obj_set_pos(resetLabels[i],0,31);
+  values[i]=label(row,"--%",openStyle?&lv_font_montserrat_20:&lv_font_montserrat_16,C(0xF2F2F2));lv_obj_align(values[i],LV_ALIGN_TOP_RIGHT,0,openStyle?-2:0);
+  bars[i]=lv_bar_create(row);lv_obj_set_size(bars[i],width,barHeight);lv_obj_set_pos(bars[i],0,barY);lv_bar_set_range(bars[i],0,100);lv_obj_set_style_bg_color(bars[i],C(0x282828),LV_PART_MAIN);lv_obj_set_style_bg_opa(bars[i],LV_OPA_COVER,LV_PART_MAIN);lv_obj_set_style_radius(bars[i],4,LV_PART_MAIN);lv_obj_set_style_radius(bars[i],4,LV_PART_INDICATOR);
+  paceMarkers[i]=lv_obj_create(row);lv_obj_set_size(paceMarkers[i],3,barHeight+4);lv_obj_set_pos(paceMarkers[i],0,markerY[i]);lv_obj_set_style_bg_color(paceMarkers[i],C(0xFFFFFF),0);lv_obj_set_style_bg_opa(paceMarkers[i],LV_OPA_COVER,0);lv_obj_set_style_border_width(paceMarkers[i],0,0);lv_obj_set_style_radius(paceMarkers[i],1,0);lv_obj_set_style_pad_all(paceMarkers[i],0,0);lv_obj_clear_flag(paceMarkers[i],LV_OBJ_FLAG_SCROLLABLE);lv_obj_add_flag(paceMarkers[i],LV_OBJ_FLAG_HIDDEN);
+  resetLabels[i]=label(row,"Waiting for usage data",&lv_font_montserrat_12,C(0x929292));lv_obj_set_pos(resetLabels[i],0,resetY);
 }
-static lv_obj_t *makeProviderPanel(const char *title,int y,int height){
-  lv_obj_t *p=lv_obj_create(lv_scr_act());lv_obj_set_size(p,440,height);lv_obj_set_pos(p,20,y);panel(p);lv_obj_set_style_pad_all(p,14,0);
-  lv_obj_t *heading=label(p,title,&lv_font_montserrat_20,C(0xFFFFFF));lv_obj_set_pos(heading,0,-3);return p;
+static lv_obj_t *makeProviderPanel(const char *title,int y,int height,bool openStyle){
+  lv_obj_t *p=lv_obj_create(lv_scr_act());lv_obj_set_size(p,openStyle?464:440,height);lv_obj_set_pos(p,openStyle?8:20,y);
+  if(openStyle){lv_obj_set_style_bg_opa(p,LV_OPA_TRANSP,0);lv_obj_set_style_border_width(p,0,0);lv_obj_clear_flag(p,LV_OBJ_FLAG_SCROLLABLE);lv_obj_set_style_pad_all(p,8,0);}else{panel(p);lv_obj_set_style_pad_all(p,14,0);}
+  lv_obj_t *heading=label(p,title,openStyle?&lv_font_montserrat_24:&lv_font_montserrat_20,C(0xFFFFFF));lv_obj_set_pos(heading,0,openStyle?-5:-3);return p;
 }
 void displayBegin(const AppConfig &config){
   pinMode(38,OUTPUT);digitalWrite(38,HIGH);gfx->begin(10000000);gfx->fillScreen(BLACK);touch.begin();touch.setRotation(ROTATION_NORMAL);
@@ -49,13 +53,15 @@ void displayBegin(const AppConfig &config){
   lv_obj_set_style_bg_color(lv_scr_act(),C(0x000000),0);lv_obj_set_style_bg_opa(lv_scr_act(),LV_OPA_COVER,0);
   lv_obj_t *title=label(lv_scr_act(),"AI USAGE",&lv_font_montserrat_20,C(0xFFFFFF));lv_obj_set_pos(title,20,15);
   networkLabel=label(lv_scr_act(),"STARTING",&lv_font_montserrat_12,C(0xF2A93B));lv_obj_align(networkLabel,LV_ALIGN_TOP_RIGHT,-20,20);
+  bool openStyle=config.displayStyle==1;
   bool visible[5]={config.showCursorModels,config.showCursorOther,config.showCursorOnDemand,config.showCodexFiveHour,config.showCodexWeekly};
-  int cursorCount=visible[0]+visible[1]+visible[2],codexCount=visible[3]+visible[4],panelY=50;
-  lv_obj_t *cursorPanel=makeProviderPanel("CURSOR",panelY,64+52*max(cursorCount,1));makeUsageRow(cursorPanel,0,30);makeUsageRow(cursorPanel,1,82);makeUsageRow(cursorPanel,2,134);
-  int rowY=30;for(int i=0;i<3;i++){if(visible[i]){lv_obj_set_y(rows[i],rowY);lv_obj_clear_flag(rows[i],LV_OBJ_FLAG_HIDDEN);rowY+=52;}else lv_obj_add_flag(rows[i],LV_OBJ_FLAG_HIDDEN);}
-  if(cursorCount)panelY+=64+52*cursorCount+12;else lv_obj_add_flag(cursorPanel,LV_OBJ_FLAG_HIDDEN);
-  lv_obj_t *codexPanel=makeProviderPanel("CODEX",panelY,64+52*max(codexCount,1));makeUsageRow(codexPanel,3,30);makeUsageRow(codexPanel,4,82);
-  rowY=30;for(int i=3;i<5;i++){if(visible[i]){lv_obj_set_y(rows[i],rowY);lv_obj_clear_flag(rows[i],LV_OBJ_FLAG_HIDDEN);rowY+=52;}else lv_obj_add_flag(rows[i],LV_OBJ_FLAG_HIDDEN);}
+  int cursorCount=visible[0]+visible[1]+visible[2],codexCount=visible[3]+visible[4];
+  int rowStep=openStyle?58:52,panelBase=openStyle?48:64,panelGap=openStyle?4:12,panelY=openStyle?48:50,rowStart=openStyle?28:30;
+  lv_obj_t *cursorPanel=makeProviderPanel("CURSOR",panelY,panelBase+rowStep*max(cursorCount,1),openStyle);makeUsageRow(cursorPanel,0,rowStart,openStyle);makeUsageRow(cursorPanel,1,rowStart+rowStep,openStyle);makeUsageRow(cursorPanel,2,rowStart+rowStep*2,openStyle);
+  int rowY=rowStart;for(int i=0;i<3;i++){if(visible[i]){lv_obj_set_y(rows[i],rowY);lv_obj_clear_flag(rows[i],LV_OBJ_FLAG_HIDDEN);rowY+=rowStep;}else lv_obj_add_flag(rows[i],LV_OBJ_FLAG_HIDDEN);}
+  if(cursorCount)panelY+=panelBase+rowStep*cursorCount+panelGap;else lv_obj_add_flag(cursorPanel,LV_OBJ_FLAG_HIDDEN);
+  lv_obj_t *codexPanel=makeProviderPanel("CODEX",panelY,panelBase+rowStep*max(codexCount,1),openStyle);makeUsageRow(codexPanel,3,rowStart,openStyle);makeUsageRow(codexPanel,4,rowStart+rowStep,openStyle);
+  rowY=rowStart;for(int i=3;i<5;i++){if(visible[i]){lv_obj_set_y(rows[i],rowY);lv_obj_clear_flag(rows[i],LV_OBJ_FLAG_HIDDEN);rowY+=rowStep;}else lv_obj_add_flag(rows[i],LV_OBJ_FLAG_HIDDEN);}
   if(!codexCount)lv_obj_add_flag(codexPanel,LV_OBJ_FLAG_HIDDEN);
 }
 void displayLoop(){lv_timer_handler();}
@@ -65,7 +71,7 @@ static void updateRow(int i,const UsageWindow &w,const String &providerStatus,ui
   rowData[i]=w;rowStatus[i]=providerStatus;float p=w.usedPercent;lv_color_t color;String state;
   if(p<0){color=C(0x7D7D7D);state="NO DATA";}else if(p>=critical){color=C(0xFF4040);state="CRITICAL";}else if(p>=warning){color=C(0xF0A020);state="WARNING";}else{color=C(0x35D078);state="OK";}
   String valueText=p<0?"--%":String(p,0)+"%";lv_label_set_text(statusLabels[i],state.c_str());lv_obj_set_style_text_color(statusLabels[i],color,0);lv_label_set_text(values[i],valueText.c_str());lv_obj_set_style_text_color(values[i],color,0);lv_obj_set_style_bg_color(bars[i],color,LV_PART_INDICATOR);lv_bar_set_value(bars[i],p<0?0:(int)constrain(p,0,100),LV_ANIM_OFF);
-  if(w.elapsedPercent>=0){int markerX=(int)(constrain(w.elapsedPercent,0.0f,100.0f)*407.0f/100.0f);lv_obj_set_pos(paceMarkers[i],markerX,18);lv_obj_clear_flag(paceMarkers[i],LV_OBJ_FLAG_HIDDEN);lv_obj_move_foreground(paceMarkers[i]);}else lv_obj_add_flag(paceMarkers[i],LV_OBJ_FLAG_HIDDEN);
+  if(w.elapsedPercent>=0){int markerX=(int)(constrain(w.elapsedPercent,0.0f,100.0f)*(barWidths[i]-3)/100.0f);lv_obj_set_pos(paceMarkers[i],markerX,markerY[i]);lv_obj_clear_flag(paceMarkers[i],LV_OBJ_FLAG_HIDDEN);lv_obj_move_foreground(paceMarkers[i]);}else lv_obj_add_flag(paceMarkers[i],LV_OBJ_FLAG_HIDDEN);
   String bottom=w.resetText.length()?w.resetText:providerStatus;if(p<0&&networkAddress.length()&&(providerStatus=="disabled"||providerStatus.indexOf("missing")>=0))bottom="Setup: http://"+networkAddress;lv_label_set_text(resetLabels[i],bottom.c_str());
 }
 void displayUpdate(const UsageSnapshot &codex,const UsageSnapshot &cursor,uint8_t warning,uint8_t critical){

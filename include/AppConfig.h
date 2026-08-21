@@ -21,6 +21,7 @@ struct AppConfig {
   uint8_t warningPercent = 70;
   uint8_t criticalPercent = 90;
   bool verifyTls = true;
+  uint8_t displayStyle = 0;  // 0 = framed panels, 1 = open/frameless
   bool showCursorModels = true;
   bool showCursorOther = true;
   bool showCursorOnDemand = true;

@@ -4,7 +4,7 @@ Native, standalone firmware for the 4-inch GUITION ESP32-S3 4848S040 (480×480).
 
 ## What is included
 
-- Modern 480×480 LVGL dashboard with one grouped Cursor panel on top and one grouped Codex panel below, individually selectable progress bars, reset-period pace markers, status colors, and tap-to-open detail overlays
+- Modern 480×480 LVGL dashboard with selectable framed or open/frameless design, individually selectable progress bars, reset-period pace markers, status colors, and tap-to-open detail overlays
 - ST7701S RGB panel, GT911 touch, 150 Hz PWM backlight, octal PSRAM, and 16 MB flash configuration
 - Wi-Fi station mode plus automatic setup/recovery AP (`ESPUsage-Setup`)
 - Browser-based Wi-Fi scan, network selection, password entry, and NVS-backed reset/reconfiguration
@@ -106,7 +106,7 @@ The display maps the currently observed response fields as follows:
 - Other Models: `individualUsage.plan.apiPercentUsed`
 - On Demand: percentage calculated from `individualUsage.onDemand.used` and `.limit` (with `teamUsage.onDemand` as a fallback)
 
-All three Cursor cards use `billingCycleStart` and `billingCycleEnd` for the remaining reset time and white elapsed-period marker. Codex uses each rate-limit window's duration and reset time for the same marker; adapters can supply `elapsed_percent`. Every one of the five rows can be enabled or disabled under **Display and status**, and the two provider panels compact automatically. The implementation is isolated in `src/providers/CursorProvider.cpp` so a future schema change does not affect the display, storage, or Codex provider.
+All three Cursor cards use `billingCycleStart` and `billingCycleEnd` for the remaining reset time and white elapsed-period marker. Codex uses each rate-limit window's duration and reset time for the same marker; adapters can supply `elapsed_percent`. Under **Display and status**, choose **Panels** for the original framed dashboard or **Open** for a frameless layout with wider bars and larger typography. Every one of the five rows can also be enabled or disabled, and both layouts compact automatically. The implementation is isolated in `src/providers/CursorProvider.cpp` so a future schema change does not affect the display, storage, or Codex provider.
 
 ## Security notes
 
