@@ -16,6 +16,8 @@ struct AppConfig {
   ProviderConfig cursor;
   uint8_t brightness = 85;
   uint16_t refreshMinutes = 5;
+  uint8_t warningPercent = 70;
+  uint8_t criticalPercent = 90;
   bool verifyTls = true;
 };
 
