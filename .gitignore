@@ -1,4 +1,5 @@
 .pio/
+.pio-local/
 .vscode/
 *.log
 secrets.*

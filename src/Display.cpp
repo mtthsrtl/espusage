@@ -6,11 +6,11 @@
 
 static Arduino_DataBus *bus=new Arduino_SWSPI(GFX_NOT_DEFINED,39,48,47,GFX_NOT_DEFINED);
 static Arduino_ESP32RGBPanel *rgb=new Arduino_ESP32RGBPanel(18,17,16,21,11,12,13,14,0,8,20,3,46,9,10,4,5,6,7,15,1,10,8,50,1,10,8,20,0,10000000,false,0,0,0);
-static Arduino_RGB_Display *gfx=new Arduino_RGB_Display(480,480,rgb,1,true,bus,GFX_NOT_DEFINED,st7701_type9_init_operations,sizeof(st7701_type9_init_operations));
+static Arduino_RGB_Display *gfx=new Arduino_RGB_Display(480,480,rgb,0,true,bus,GFX_NOT_DEFINED,st7701_type9_init_operations,sizeof(st7701_type9_init_operations));
 static TAMC_GT911 touch(19,45,41,42,480,480);
 static lv_disp_draw_buf_t drawBuf; static lv_color_t *drawMemory;
-static lv_obj_t *networkLabel,*statusLabels[5],*values[5],*bars[5],*resetLabels[5];
-static String rowNames[5]={"CURSOR MODELS","AUTO MODELS","API USAGE","5-HOUR LIMIT","WEEKLY LIMIT"};
+static lv_obj_t *networkLabel,*statusLabels[5],*values[5],*bars[5],*paceMarkers[5],*resetLabels[5],*rows[5];
+static String rowNames[5]={"CURSOR MODELS","OTHER MODELS","ON DEMAND","5-HOUR LIMIT","WEEKLY LIMIT"};
 static UsageWindow rowData[5]; static String rowStatus[5]; static String networkAddress;
 
 static lv_color_t C(uint32_t v){return lv_color_hex(v);}
@@ -29,17 +29,19 @@ static void details(lv_event_t *e){
 }
 static void makeUsageRow(lv_obj_t *parent,int i,int y){
   lv_obj_t *row=lv_obj_create(parent);lv_obj_set_size(row,410,50);lv_obj_set_pos(row,0,y);lv_obj_set_style_bg_opa(row,LV_OPA_TRANSP,0);lv_obj_set_style_border_width(row,0,0);lv_obj_set_style_pad_all(row,0,0);lv_obj_clear_flag(row,LV_OBJ_FLAG_SCROLLABLE);lv_obj_add_flag(row,LV_OBJ_FLAG_CLICKABLE);lv_obj_add_event_cb(row,details,LV_EVENT_CLICKED,(void*)(intptr_t)i);
+  rows[i]=row;
   lv_obj_t *n=label(row,rowNames[i].c_str(),&lv_font_montserrat_12,C(0xF2F2F2));lv_obj_set_pos(n,0,0);
   statusLabels[i]=label(row,"WAITING",&lv_font_montserrat_12,C(0x888888));lv_obj_align(statusLabels[i],LV_ALIGN_TOP_RIGHT,-62,0);
   values[i]=label(row,"--%",&lv_font_montserrat_16,C(0xF2F2F2));lv_obj_align(values[i],LV_ALIGN_TOP_RIGHT,0,0);
   bars[i]=lv_bar_create(row);lv_obj_set_size(bars[i],410,7);lv_obj_set_pos(bars[i],0,20);lv_bar_set_range(bars[i],0,100);lv_obj_set_style_bg_color(bars[i],C(0x282828),LV_PART_MAIN);lv_obj_set_style_bg_opa(bars[i],LV_OPA_COVER,LV_PART_MAIN);lv_obj_set_style_radius(bars[i],4,LV_PART_MAIN);lv_obj_set_style_radius(bars[i],4,LV_PART_INDICATOR);
+  paceMarkers[i]=lv_obj_create(row);lv_obj_set_size(paceMarkers[i],3,11);lv_obj_set_pos(paceMarkers[i],0,18);lv_obj_set_style_bg_color(paceMarkers[i],C(0xFFFFFF),0);lv_obj_set_style_bg_opa(paceMarkers[i],LV_OPA_COVER,0);lv_obj_set_style_border_width(paceMarkers[i],0,0);lv_obj_set_style_radius(paceMarkers[i],1,0);lv_obj_set_style_pad_all(paceMarkers[i],0,0);lv_obj_clear_flag(paceMarkers[i],LV_OBJ_FLAG_SCROLLABLE);lv_obj_add_flag(paceMarkers[i],LV_OBJ_FLAG_HIDDEN);
   resetLabels[i]=label(row,"Waiting for usage data",&lv_font_montserrat_12,C(0x929292));lv_obj_set_pos(resetLabels[i],0,31);
 }
 static lv_obj_t *makeProviderPanel(const char *title,int y,int height){
   lv_obj_t *p=lv_obj_create(lv_scr_act());lv_obj_set_size(p,440,height);lv_obj_set_pos(p,20,y);panel(p);lv_obj_set_style_pad_all(p,14,0);
   lv_obj_t *heading=label(p,title,&lv_font_montserrat_20,C(0xFFFFFF));lv_obj_set_pos(heading,0,-3);return p;
 }
-void displayBegin(){
+void displayBegin(const AppConfig &config){
   pinMode(38,OUTPUT);digitalWrite(38,HIGH);gfx->begin(10000000);gfx->fillScreen(BLACK);touch.begin();touch.setRotation(ROTATION_NORMAL);
   lv_init();drawMemory=(lv_color_t*)heap_caps_malloc(480*32*sizeof(lv_color_t),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);lv_disp_draw_buf_init(&drawBuf,drawMemory,nullptr,480*32);
   static lv_disp_drv_t dd;lv_disp_drv_init(&dd);dd.hor_res=480;dd.ver_res=480;dd.flush_cb=flush;dd.draw_buf=&drawBuf;lv_disp_drv_register(&dd);
@@ -47,8 +49,14 @@ void displayBegin(){
   lv_obj_set_style_bg_color(lv_scr_act(),C(0x000000),0);lv_obj_set_style_bg_opa(lv_scr_act(),LV_OPA_COVER,0);
   lv_obj_t *title=label(lv_scr_act(),"AI USAGE",&lv_font_montserrat_20,C(0xFFFFFF));lv_obj_set_pos(title,20,15);
   networkLabel=label(lv_scr_act(),"STARTING",&lv_font_montserrat_12,C(0xF2A93B));lv_obj_align(networkLabel,LV_ALIGN_TOP_RIGHT,-20,20);
-  lv_obj_t *cursorPanel=makeProviderPanel("CURSOR",50,220);makeUsageRow(cursorPanel,0,30);makeUsageRow(cursorPanel,1,82);makeUsageRow(cursorPanel,2,134);
-  lv_obj_t *codexPanel=makeProviderPanel("CODEX",282,178);makeUsageRow(codexPanel,3,30);makeUsageRow(codexPanel,4,84);
+  bool visible[5]={config.showCursorModels,config.showCursorOther,config.showCursorOnDemand,config.showCodexFiveHour,config.showCodexWeekly};
+  int cursorCount=visible[0]+visible[1]+visible[2],codexCount=visible[3]+visible[4],panelY=50;
+  lv_obj_t *cursorPanel=makeProviderPanel("CURSOR",panelY,64+52*max(cursorCount,1));makeUsageRow(cursorPanel,0,30);makeUsageRow(cursorPanel,1,82);makeUsageRow(cursorPanel,2,134);
+  int rowY=30;for(int i=0;i<3;i++){if(visible[i]){lv_obj_set_y(rows[i],rowY);lv_obj_clear_flag(rows[i],LV_OBJ_FLAG_HIDDEN);rowY+=52;}else lv_obj_add_flag(rows[i],LV_OBJ_FLAG_HIDDEN);}
+  if(cursorCount)panelY+=64+52*cursorCount+12;else lv_obj_add_flag(cursorPanel,LV_OBJ_FLAG_HIDDEN);
+  lv_obj_t *codexPanel=makeProviderPanel("CODEX",panelY,64+52*max(codexCount,1));makeUsageRow(codexPanel,3,30);makeUsageRow(codexPanel,4,82);
+  rowY=30;for(int i=3;i<5;i++){if(visible[i]){lv_obj_set_y(rows[i],rowY);lv_obj_clear_flag(rows[i],LV_OBJ_FLAG_HIDDEN);rowY+=52;}else lv_obj_add_flag(rows[i],LV_OBJ_FLAG_HIDDEN);}
+  if(!codexCount)lv_obj_add_flag(codexPanel,LV_OBJ_FLAG_HIDDEN);
 }
 void displayLoop(){lv_timer_handler();}
 void displaySetBrightness(uint8_t v){digitalWrite(38,v?HIGH:LOW);}
@@ -57,6 +65,7 @@ static void updateRow(int i,const UsageWindow &w,const String &providerStatus,ui
   rowData[i]=w;rowStatus[i]=providerStatus;float p=w.usedPercent;lv_color_t color;String state;
   if(p<0){color=C(0x7D7D7D);state="NO DATA";}else if(p>=critical){color=C(0xFF4040);state="CRITICAL";}else if(p>=warning){color=C(0xF0A020);state="WARNING";}else{color=C(0x35D078);state="OK";}
   String valueText=p<0?"--%":String(p,0)+"%";lv_label_set_text(statusLabels[i],state.c_str());lv_obj_set_style_text_color(statusLabels[i],color,0);lv_label_set_text(values[i],valueText.c_str());lv_obj_set_style_text_color(values[i],color,0);lv_obj_set_style_bg_color(bars[i],color,LV_PART_INDICATOR);lv_bar_set_value(bars[i],p<0?0:(int)constrain(p,0,100),LV_ANIM_OFF);
+  if(w.elapsedPercent>=0){int markerX=(int)(constrain(w.elapsedPercent,0.0f,100.0f)*407.0f/100.0f);lv_obj_set_pos(paceMarkers[i],markerX,18);lv_obj_clear_flag(paceMarkers[i],LV_OBJ_FLAG_HIDDEN);lv_obj_move_foreground(paceMarkers[i]);}else lv_obj_add_flag(paceMarkers[i],LV_OBJ_FLAG_HIDDEN);
   String bottom=w.resetText.length()?w.resetText:providerStatus;if(p<0&&networkAddress.length()&&(providerStatus=="disabled"||providerStatus.indexOf("missing")>=0))bottom="Setup: http://"+networkAddress;lv_label_set_text(resetLabels[i],bottom.c_str());
 }
 void displayUpdate(const UsageSnapshot &codex,const UsageSnapshot &cursor,uint8_t warning,uint8_t critical){
@@ -64,4 +73,3 @@ void displayUpdate(const UsageSnapshot &codex,const UsageSnapshot &cursor,uint8_
   Serial.printf("[display] Cursor %.1f / %.1f / %.1f, Codex %.1f / %.1f\n",cursor.primary.usedPercent,cursor.secondary.usedPercent,cursor.tertiary.usedPercent,codex.primary.usedPercent,codex.secondary.usedPercent);
   lv_obj_invalidate(lv_scr_act());lv_refr_now(nullptr);
 }
-

@@ -41,20 +41,42 @@ static String remainingText(const char *iso) {
   uint32_t s=end-now,d=s/86400; s%=86400; uint32_t h=s/3600,m=(s%3600)/60;
   return d ? "reset in "+String(d)+"d "+String(h)+"h" : "reset in "+String(h)+"h "+String(m)+"m";
 }
+static float elapsedPercent(const char *startIso, const char *endIso) {
+  time_t start=parseIsoUtc(startIso),end=parseIsoUtc(endIso),now=time(nullptr);
+  if(start<=0||end<=start||now<1700000000)return -1.0f;
+  float elapsed=100.0f*(float)(now-start)/(float)(end-start);
+  return constrain(elapsed,0.0f,100.0f);
+}
+static float onDemandPercent(JsonVariant bucket) {
+  if(bucket.isNull())return -1.0f;
+  bool enabled=bucket["enabled"]|false;
+  float limit=bucket["limit"]|-1.0f;
+  float used=bucket["used"]|-1.0f;
+  float remaining=bucket["remaining"]|-1.0f;
+  if(limit>0){
+    if(used<0&&remaining>=0)used=limit-remaining;
+    if(used<0)used=0;
+    return constrain(100.0f*used/limit,0.0f,100.0f);
+  }
+  return enabled?-1.0f:0.0f;
+}
 UsageSnapshot CursorProvider::fetch(const ProviderConfig &cfg, bool tls) {
-  UsageSnapshot out; out.provider="Cursor"; out.primary.label="CURSOR MODELS"; out.secondary.label="AUTO MODELS"; out.tertiary.label="API USAGE";
+  UsageSnapshot out; out.provider="Cursor"; out.primary.label="CURSOR MODELS"; out.secondary.label="OTHER MODELS"; out.tertiary.label="ON DEMAND";
   if(!cfg.enabled){out.status="disabled";return out;} if(!cfg.token.length()){out.status="auth token missing";return out;}
   ProviderConfig request=cfg; request.token=""; request.session=cookieFor(cfg.token);
   JsonDocument d; String error; String url=cfg.endpoint.length()?cfg.endpoint:"https://cursor.com/api/usage-summary";
   if(!getJson(url,request,tls,d,error)){out.status=error;return out;}
   float autoUsed=d["individualUsage"]["plan"]["autoPercentUsed"]|-1.0f;
   float apiUsed=d["individualUsage"]["plan"]["apiPercentUsed"]|-1.0f;
-  float totalUsed=d["individualUsage"]["plan"]["totalPercentUsed"]|-1.0f;
-  if(totalUsed<0) totalUsed=max(autoUsed,apiUsed);
+  float demandUsed=onDemandPercent(d["individualUsage"]["onDemand"]);
+  if(demandUsed<0)demandUsed=onDemandPercent(d["teamUsage"]["onDemand"]);
+  if(demandUsed<0)demandUsed=0.0f;
   String reset=remainingText(d["billingCycleEnd"]|"");
-  out.primary.usedPercent=totalUsed; out.secondary.usedPercent=autoUsed; out.tertiary.usedPercent=apiUsed;
+  float elapsed=elapsedPercent(d["billingCycleStart"]|"",d["billingCycleEnd"]|"");
+  out.primary.usedPercent=autoUsed; out.secondary.usedPercent=apiUsed; out.tertiary.usedPercent=demandUsed;
+  out.primary.elapsedPercent=elapsed; out.secondary.elapsedPercent=elapsed; out.tertiary.elapsedPercent=elapsed;
   out.primary.resetText=reset; out.secondary.resetText=reset; out.tertiary.resetText=reset;
-  out.plan=String((const char*)(d["membershipType"]|"")); out.ok=out.primary.usedPercent>=0;
+  out.plan=String((const char*)(d["membershipType"]|"")); out.ok=out.primary.usedPercent>=0||out.secondary.usedPercent>=0;
   out.status=out.ok?"online (unofficial)":"usage fields missing"; return out;
 }
 
