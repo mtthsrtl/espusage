@@ -6,7 +6,7 @@
 
 static Arduino_DataBus *bus=new Arduino_SWSPI(GFX_NOT_DEFINED,39,48,47,GFX_NOT_DEFINED);
 static Arduino_ESP32RGBPanel *rgb=new Arduino_ESP32RGBPanel(18,17,16,21,11,12,13,14,0,8,20,3,46,9,10,4,5,6,7,15,1,10,8,50,1,10,8,20,0,12000000,true,0,0,0);
-static Arduino_RGB_Display *gfx=new Arduino_RGB_Display(480,480,rgb,0,true,bus,GFX_NOT_DEFINED,st7701_type1_init_operations,sizeof(st7701_type1_init_operations));
+static Arduino_RGB_Display *gfx=new Arduino_RGB_Display(480,480,rgb,1,true,bus,GFX_NOT_DEFINED,st7701_type9_init_operations,sizeof(st7701_type9_init_operations));
 static TAMC_GT911 touch(19,45,41,42,480,480);
 static lv_disp_draw_buf_t drawBuf; static lv_color_t *drawMemory;
 static lv_obj_t *networkLabel,*cards[2],*providerLabels[2],*windowLabels[2],*values[2],*statusLabels[2],*bars[2],*resetLabels[2];
@@ -38,7 +38,7 @@ static void makeUsageCard(int i,int y,const char *provider,const char *window){
   resetLabels[i]=makeLabel(cards[i],"Waiting for usage data",&lv_font_montserrat_12,C(0x8893A0));lv_obj_align(resetLabels[i],LV_ALIGN_BOTTOM_LEFT,0,1);
 }
 void displayBegin(){
-  pinMode(38,OUTPUT);digitalWrite(38,HIGH);gfx->begin(12000000);bus->beginWrite();bus->writeCommand(0x20);bus->endWrite();gfx->fillScreen(BLACK);touch.begin();touch.setRotation(ROTATION_NORMAL);
+  pinMode(38,OUTPUT);digitalWrite(38,HIGH);gfx->begin(12000000);gfx->fillScreen(BLACK);touch.begin();touch.setRotation(ROTATION_NORMAL);
   lv_init();drawMemory=(lv_color_t*)heap_caps_malloc(480*32*sizeof(lv_color_t),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);lv_disp_draw_buf_init(&drawBuf,drawMemory,nullptr,480*32);
   static lv_disp_drv_t dd;lv_disp_drv_init(&dd);dd.hor_res=480;dd.ver_res=480;dd.flush_cb=flush;dd.draw_buf=&drawBuf;lv_disp_drv_register(&dd);
   static lv_indev_drv_t id;lv_indev_drv_init(&id);id.type=LV_INDEV_TYPE_POINTER;id.read_cb=readTouch;lv_indev_drv_register(&id);
