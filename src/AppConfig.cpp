@@ -29,7 +29,7 @@ bool loadConfig(AppConfig &c) {
 bool saveConfig(const AppConfig &c) {
   if (!prefs.begin("espusage", false)) return false;
   prefs.putString("ssid", c.wifiSsid); prefs.putString("wifi_pw", c.wifiPassword);
-  prefs.putBool("wifi_saved", true);
+  prefs.putBool("wifi_saved", c.wifiProvisioned && c.wifiSsid.length() > 0);
   prefs.putString("host", c.hostname);
   prefs.putBool("codex_on", c.codex.enabled); prefs.putString("codex_url", c.codex.endpoint);
   prefs.putString("codex_tok", c.codex.token); prefs.putString("codex_sess", c.codex.session);
@@ -39,6 +39,29 @@ bool saveConfig(const AppConfig &c) {
   prefs.putUChar("warn_pct", c.warningPercent); prefs.putUChar("crit_pct", c.criticalPercent);
   prefs.putBool("tls", c.verifyTls); prefs.end();
   return true;
+}
+
+bool saveWifiConfig(AppConfig &c, const String &ssid, const String &password) {
+  String cleanSsid = ssid;
+  cleanSsid.trim();
+  if (!cleanSsid.length() || cleanSsid.length() > 32 || password.length() > 64) return false;
+  if (!prefs.begin("espusage", false)) return false;
+  bool ok = prefs.putString("ssid", cleanSsid) > 0;
+  prefs.putString("wifi_pw", password);
+  ok = prefs.putBool("wifi_saved", true) && ok;
+  prefs.end();
+  if (ok) { c.wifiSsid = cleanSsid; c.wifiPassword = password; c.wifiProvisioned = true; }
+  return ok;
+}
+
+bool eraseWifiConfig(AppConfig &c) {
+  if (!prefs.begin("espusage", false)) return false;
+  bool ok = prefs.remove("ssid") || !prefs.isKey("ssid");
+  prefs.remove("wifi_pw");
+  prefs.remove("wifi_saved");
+  prefs.end();
+  c.wifiSsid = ""; c.wifiPassword = ""; c.wifiProvisioned = false;
+  return ok;
 }
 
 void eraseConfig() { if (prefs.begin("espusage", false)) { prefs.clear(); prefs.end(); } }

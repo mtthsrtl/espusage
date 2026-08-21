@@ -24,5 +24,7 @@ struct AppConfig {
 
 bool loadConfig(AppConfig &cfg);
 bool saveConfig(const AppConfig &cfg);
+bool saveWifiConfig(AppConfig &cfg, const String &ssid, const String &password);
+bool eraseWifiConfig(AppConfig &cfg);
 void eraseConfig();
 

@@ -6,7 +6,8 @@ Native, standalone firmware for the 4-inch GUITION ESP32-S3 4848S040 (480×480).
 
 - Modern 480×480 LVGL dashboard with Codex and Cursor cards, progress bars, status colors, and tap-to-open detail overlays
 - ST7701S RGB panel, GT911 touch, 150 Hz PWM backlight, octal PSRAM, and 16 MB flash configuration
-- Wi-Fi station mode plus setup/recovery AP (`ESPUsage-Setup` or `ESPUsage-Recovery`)
+- Wi-Fi station mode plus automatic setup/recovery AP (`ESPUsage-Setup`)
+- Browser-based Wi-Fi scan, network selection, password entry, and NVS-backed reset/reconfiguration
 - Local web configuration at `http://espusage.local/` or the IP shown on screen
 - Credentials saved only at runtime in ESP32 NVS; no secrets are compiled into the firmware or returned by diagnostics
 - Browser-upload OTA page, dual OTA partitions, `/api/health`, and redacted `/api/status`
@@ -27,7 +28,7 @@ Do **not** install this firmware through EspControl's existing web updater. EspC
    Copy-Item platformio.ini.example platformio.ini
    ```
 
-   `platformio.ini` is ignored by Git. COM ports and optional local Wi-Fi build values therefore remain only on your computer.
+   `platformio.ini` is ignored by Git. Wi-Fi credentials are never build flags and are entered only through the device setup portal.
 3. Connect the 4848S040 to the computer using a **USB-C data cable**. Disconnect other serial ESP boards.
 4. Let Windows finish installing the USB serial driver. In Device Manager, note the new COM port (for example `COM7`).
 5. In `platformio.ini`, add this line below `upload_speed` if automatic port detection chooses incorrectly:
@@ -42,9 +43,17 @@ Do **not** install this firmware through EspControl's existing web updater. EspC
    pio run -e guition-4848s040 -t upload
    ```
 
+   For the requested Windows port `COM8`, the exact command is:
+
+   ```powershell
+   pio run -e guition-4848s040 -t upload --upload-port COM8
+   ```
+
 7. If the connection times out: hold **BOOT**, briefly press **RESET**, release **BOOT** after one second, and run Upload again. Some enclosures expose only reset; in that case unplug USB, hold BOOT while reconnecting, then release it.
 8. Wait for `SUCCESS`. Power-cycle the panel once if the screen remains blank after the automatic reset.
-9. Join the Wi-Fi network **ESPUsage-Setup**, browse to `http://192.168.4.1/`, enter your Wi-Fi settings, and save. After restart, open the IP shown on the display or `http://espusage.local/`.
+9. Join the Wi-Fi network **ESPUsage-Setup** and browse to `http://192.168.4.1/`. Click **Scan again**, select your Wi-Fi network, enter its password, and choose **Save WiFi & restart**. After restart, open the IP shown on the display or `http://espusage.local/`.
+
+If the saved network cannot be reached after three connection attempts, the device automatically starts **ESPUsage-Setup** again. The same Wi-Fi scanner is available later under **Settings / WiFi** in the normal LAN web UI. **Delete WiFi configuration** removes only the Wi-Fi credentials from NVS and restarts the setup AP; provider and display settings remain intact.
 
 The USB upload writes the bootloader, partition table, OTA metadata, and application at their correct offsets. Existing EspControl configuration is erased/ignored; keep a backup if you may want to return to it.
 
@@ -121,6 +130,9 @@ Tested with PlatformIO `espressif32@6.12.0`, Arduino-ESP32 2.0.17, Arduino_GFX 1
 | `/api/health` | GET | Minimal liveness response |
 | `/api/status` | GET | Redacted runtime/debug status |
 | `/api/config` | POST | Save settings to NVS and restart |
+| `/api/wifi/scan` | GET | Scan nearby Wi-Fi networks |
+| `/api/wifi` | POST | Save selected Wi-Fi credentials and restart |
+| `/api/wifi` | DELETE | Delete Wi-Fi credentials and restart in setup mode |
 | `/api/ota` | POST | Upload an application `firmware.bin` |
 
 ## License

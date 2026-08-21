@@ -13,9 +13,6 @@ upload_speed = 921600
 upload_port = COM8
 build_flags =
   -DARDUINO_USB_CDC_ON_BOOT=0
-  ; Optional local provisioning. Never commit real values:
-  ; -DESPUSAGE_WIFI_SSID=MyWiFi
-  ; -DESPUSAGE_WIFI_PASSWORD=MyPassword
   -DLV_CONF_INCLUDE_SIMPLE
   -DLV_COLOR_DEPTH=16
   -DLV_COLOR_16_SWAP=1
