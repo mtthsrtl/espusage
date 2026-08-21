@@ -12,6 +12,18 @@ static UsageSnapshot latestCodex;
 static UsageSnapshot latestCursor;
 static bool hasUsageSnapshot = false;
 
+static const char OTA_SUCCESS_PAGE[] PROGMEM = R"HTML(
+<!doctype html><html><head><meta name=viewport content="width=device-width,initial-scale=1"><title>ESP Usage update</title>
+<style>:root{color-scheme:dark}body{font:16px system-ui;background:#090c11;color:#edf2f7;max-width:620px;margin:40px auto;padding:20px}main{background:#131820;border:1px solid #2a323d;border-radius:16px;padding:24px}p{color:#aeb8c4;line-height:1.55}a{display:inline-block;margin-top:12px;padding:12px 18px;border-radius:9px;background:#10a37f;color:#fff;text-decoration:none;font-weight:700}</style></head>
+<body><main><h1>Firmware update complete</h1><p>ESP Usage is restarting. Wait a few seconds, then return to the web UI.</p><a href="/">Back to ESP Usage</a></main></body></html>
+)HTML";
+
+static const char OTA_FAILURE_PAGE[] PROGMEM = R"HTML(
+<!doctype html><html><head><meta name=viewport content="width=device-width,initial-scale=1"><title>ESP Usage update</title>
+<style>:root{color-scheme:dark}body{font:16px system-ui;background:#090c11;color:#edf2f7;max-width:620px;margin:40px auto;padding:20px}main{background:#131820;border:1px solid #2a323d;border-radius:16px;padding:24px}p{color:#f2b8b5;line-height:1.55}a{display:inline-block;margin-top:12px;padding:12px 18px;border-radius:9px;background:#263241;color:#fff;text-decoration:none;font-weight:700}</style></head>
+<body><main><h1>Firmware update failed</h1><p>The firmware could not be installed. The current firmware remains active.</p><a href="/">Back to ESP Usage</a></main></body></html>
+)HTML";
+
 static const char PAGE[] PROGMEM=R"HTML(
 <!doctype html><html><head><meta name=viewport content="width=device-width,initial-scale=1"><title>ESP Usage</title>
 <style>
@@ -163,7 +175,12 @@ void webBegin(AppConfig &c, bool setupMode){
    Serial.printf("[config][nvs] Display style=%s, mode=%s, rows: Cursor=%u/%u/%u/%u, Codex=%u/%u\n",cfg->displayStyle==1?"open":"panels",cfg->displayAvailable?"remaining":"used",cfg->showCursorModels,cfg->showCursorOther,cfg->showCursorOnDemand,cfg->showCursorThirtyMinute,cfg->showCodexWeekly,cfg->showCodexThirtyMinute);
    if(!saveConfig(*cfg)){server.send(500,"text/plain","Could not save settings.");return;} restartAfterResponse("Settings saved. Restarting...");
  });
- server.on("/api/ota",HTTP_POST,[]{bool ok=!Update.hasError();server.send(ok?200:500,"text/plain",ok?"Update complete; restarting":"Update failed");delay(400);if(ok)ESP.restart();},[]{HTTPUpload &u=server.upload();if(u.status==UPLOAD_FILE_START)Update.begin(UPDATE_SIZE_UNKNOWN,U_FLASH);else if(u.status==UPLOAD_FILE_WRITE)Update.write(u.buf,u.currentSize);else if(u.status==UPLOAD_FILE_END)Update.end(true);});
+ server.on("/api/ota",HTTP_POST,[]{
+   bool ok=!Update.hasError();
+   server.send_P(ok?200:500,"text/html",ok?OTA_SUCCESS_PAGE:OTA_FAILURE_PAGE);
+   delay(750);
+   if(ok)ESP.restart();
+ },[]{HTTPUpload &u=server.upload();if(u.status==UPLOAD_FILE_START)Update.begin(UPDATE_SIZE_UNKNOWN,U_FLASH);else if(u.status==UPLOAD_FILE_WRITE)Update.write(u.buf,u.currentSize);else if(u.status==UPLOAD_FILE_END)Update.end(true);});
  server.onNotFound([](){if(isSetupMode){server.sendHeader("Location","http://192.168.4.1/",true);server.send(302,"text/plain","");}else server.send(404,"text/plain","Not found");});
  server.begin();
 }
