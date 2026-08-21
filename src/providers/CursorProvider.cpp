@@ -1,18 +1,38 @@
 #include "providers/CursorProvider.h"
 #include "providers/HttpJson.h"
 #include <ArduinoJson.h>
+#include <time.h>
 
-UsageSnapshot CursorProvider::fetch(const ProviderConfig &cfg, bool tls) {
-  UsageSnapshot out; out.provider="Cursor"; out.primary.label="MONTH"; out.secondary.label="TODAY";
-  if (!cfg.enabled) { out.status="disabled"; return out; }
-  JsonDocument d; String error;
-  // Cursor documents this Admin API for team admins. Individual subscriptions do
-  // not currently have an official usage API; do not paste browser cookies here.
-  String body="{\"startDate\":\"2020-01-01\",\"endDate\":\"2099-12-31\"}";
-  if (!postJson(cfg.endpoint, cfg, tls, body, d, error)) { out.status=error; return out; }
-  JsonArray rows = d["data"].as<JsonArray>();
-  double spend=0; int requests=0;
-  for (JsonObject row: rows) { spend += row["spend"] | row["spendCents"] | 0.0; requests += row["totalRequests"] | row["requests"] | 0; }
-  out.primary.usedPercent = constrain((float)spend, 0.0f, 100.0f); out.primary.resetText=String(requests)+" requests";
-  out.ok=true; out.status="team admin API"; return out;
+// UNDOCUMENTED CURSOR WEB API. Mirrors E:\Cursor_Usage's read-only flow.
+// Cursor does not guarantee this endpoint or schema; it may change without notice.
+static String cookieFor(String token) {
+  token.trim();
+  const String prefix = "WorkosCursorSessionToken=";
+  if (token.startsWith(prefix)) token.remove(0, prefix.length());
+  token.replace("::", "%3A%3A");
+  return prefix + token;
 }
+static time_t parseIsoUtc(const char *iso) {
+  if (!iso || !*iso) return 0; struct tm t = {};
+  if (sscanf(iso, "%d-%d-%dT%d:%d:%d", &t.tm_year, &t.tm_mon, &t.tm_mday, &t.tm_hour, &t.tm_min, &t.tm_sec) != 6) return 0;
+  t.tm_year -= 1900; t.tm_mon -= 1; return timegm(&t);
+}
+static String remainingText(const char *iso) {
+  time_t end=parseIsoUtc(iso), now=time(nullptr); if(end<=now||now<1700000000)return "reset time unavailable";
+  uint32_t s=end-now,d=s/86400; s%=86400; uint32_t h=s/3600,m=(s%3600)/60;
+  return d ? "reset in "+String(d)+"d "+String(h)+"h" : "reset in "+String(h)+"h "+String(m)+"m";
+}
+UsageSnapshot CursorProvider::fetch(const ProviderConfig &cfg, bool tls) {
+  UsageSnapshot out; out.provider="Cursor"; out.primary.label="CURSOR MONTH"; out.secondary.label="OTHER MODELS";
+  if(!cfg.enabled){out.status="disabled";return out;} if(!cfg.token.length()){out.status="auth token missing";return out;}
+  ProviderConfig request=cfg; request.token=""; request.session=cookieFor(cfg.token);
+  JsonDocument d; String error; String url=cfg.endpoint.length()?cfg.endpoint:"https://cursor.com/api/usage-summary";
+  if(!getJson(url,request,tls,d,error)){out.status=error;return out;}
+  float autoUsed=d["individualUsage"]["plan"]["autoPercentUsed"]|-1.0f;
+  float apiUsed=d["individualUsage"]["plan"]["apiPercentUsed"]|-1.0f;
+  out.primary.usedPercent=max(autoUsed,apiUsed); out.secondary.usedPercent=apiUsed;
+  out.primary.resetText=remainingText(d["billingCycleEnd"]|""); out.secondary.resetText="API / named models";
+  out.plan=String((const char*)(d["membershipType"]|"")); out.ok=out.primary.usedPercent>=0;
+  out.status=out.ok?"online (unofficial)":"usage fields missing"; return out;
+}
+
