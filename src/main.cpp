@@ -1,6 +1,8 @@
 #include <Arduino.h>
 #include <WiFi.h>
 #include <ESPmDNS.h>
+#include <esp_sleep.h>
+#include <esp_system.h>
 #include "AppConfig.h"
 #include "Display.h"
 #include "WebPortal.h"
@@ -15,6 +17,22 @@ static CodexPaceBucket codexPace[6];
 static bool codexLastValid = false;
 static float codexLastWeekly = -1;
 static uint16_t codexSampleCount = 0;
+
+static void ensureCleanPeripheralBoot() {
+  esp_reset_reason_t reason = esp_reset_reason();
+  Serial.printf("[boot] Reset reason: %d\n", (int)reason);
+  if (reason != ESP_RST_SW) return;
+
+  // EspControl applies this workaround on the same 4848S040 hardware. After
+  // an OTA/configuration ESP.restart(), the S3 RGB/touch peripherals can retain
+  // an unusable state. A short deep sleep produces the required hardware reset;
+  // the following boot reports ESP_RST_DEEPSLEEP and continues normally.
+  Serial.println("[boot] Software reset detected; forcing clean peripheral reset");
+  Serial.flush();
+  delay(20);
+  esp_sleep_enable_timer_wakeup(100000ULL);
+  esp_deep_sleep_start();
+}
 
 static void clearCodexPace() {
   for (CodexPaceBucket &bucket : codexPace) bucket = CodexPaceBucket();
@@ -101,7 +119,7 @@ static bool connectWifi(){
     Serial.println("[wifi][setup] Falling back to recovery portal");startRecoveryAp("ESPUsage-Setup");return false;
   }
 }
-void setup(){Serial.begin(115200);delay(300);Serial.println("\n[boot] ESP Usage starting");loadConfig(config);Serial.printf("[config][nvs] Cursor: enabled=%s, token=%s\n",config.cursor.enabled?"yes":"no",config.cursor.token.length()?"stored":"missing");Serial.printf("[config][nvs] Codex: enabled=%s, access_token=%s, account_id=%s, mode=%s\n",config.codex.enabled?"yes":"no",config.codex.token.length()?"stored":"missing",config.codex.accountId.length()?"stored":"missing",config.codex.endpoint.length()?"adapter":"direct");bool connected=connectWifi();displayBegin(config);displaySetBrightness(config.brightness);displaySetNetwork(startupNetworkText,startupNetworkConnected);webBegin(config,!connected);Serial.println("[boot] Web portal ready");}
+void setup(){Serial.begin(115200);delay(300);Serial.println("\n[boot] ESP Usage starting");ensureCleanPeripheralBoot();loadConfig(config);Serial.printf("[config][nvs] Cursor: enabled=%s, token=%s\n",config.cursor.enabled?"yes":"no",config.cursor.token.length()?"stored":"missing");Serial.printf("[config][nvs] Codex: enabled=%s, access_token=%s, account_id=%s, mode=%s\n",config.codex.enabled?"yes":"no",config.codex.token.length()?"stored":"missing",config.codex.accountId.length()?"stored":"missing",config.codex.endpoint.length()?"adapter":"direct");bool connected=connectWifi();displayBegin(config);displaySetBrightness(config.brightness);displaySetNetwork(startupNetworkText,startupNetworkConnected);webBegin(config,!connected);Serial.println("[boot] Web portal ready");}
 void loop(){
   displayLoop(); webLoop();
   if(WiFi.status()==WL_CONNECTED&&(lastFetch==0||millis()-lastFetch>(uint32_t)config.refreshMinutes*60000UL)){
