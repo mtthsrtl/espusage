@@ -34,6 +34,8 @@ static uint16_t touchRawWidth = 0, touchRawHeight = 0, touchRawX = 0, touchRawY 
 static uint32_t touchCallbackCalls = 0, touchProbeAttempts = 0, touchPolls = 0, touchStateReads = 0;
 static uint32_t touchStateReadErrors = 0, touchReadyFrames = 0, touchPointFrames = 0, touchAcknowledgeErrors = 0;
 static uint32_t touchDownEvents = 0, touchUpEvents = 0, touchTapEvents = 0, touchToggleEvents = 0, touchLastEventMs = 0;
+static uint32_t touchLastCallbackMs = 0, touchFallbackReads = 0;
+static lv_indev_t *touchInputDevice = nullptr;
 
 static lv_obj_t *networkLabel, *modeLabel, *providerStatusLabels[2];
 static lv_obj_t *statusLabels[4], *values[4], *bars[4], *paceMarkers[4], *resetLabels[4], *rows[4];
@@ -146,6 +148,7 @@ static void touchBegin() {
 static void readTouch(lv_indev_drv_t *, lv_indev_data_t *data) {
   touchCallbackCalls++;
   uint32_t now = millis();
+  touchLastCallbackMs = now;
   if (!touchAddress && now - touchLastProbeMs >= 2000) {
     touchLastProbeMs = now;
     touchProbe();
@@ -453,7 +456,7 @@ static void makeUsageRow(lv_obj_t *parent, uint8_t index, int x, int y, int widt
   // Keep the reset text visually attached to its own bar. The remaining row
   // height becomes a clear gap before the next metric instead of making the
   // reset look like a subtitle for the row below.
-  lv_obj_set_pos(resetLabels[index], 0, min(31, height - 17));
+  lv_obj_set_pos(resetLabels[index], 0, max(30, height - 23));
 }
 
 static void makePaceRow(lv_obj_t *parent, uint8_t provider, int x, int y, int width, int height) {
@@ -490,7 +493,7 @@ static lv_obj_t *makeProviderPanel(const char *title, uint8_t provider, int y, i
   else panelStyle(panel);
   lv_obj_t *providerIcon = lv_img_create(panel);
   lv_img_set_src(providerIcon, provider == 0 ? &cursorProviderIcon : &codexProviderIcon);
-  lv_obj_set_pos(providerIcon, innerX, 2);
+  lv_obj_set_pos(providerIcon, innerX, 5);
   lv_obj_clear_flag(providerIcon, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
   // The supplied Cursor artwork is intentionally very dark. A partial white
   // recolor keeps its shape and shading visible on this dashboard background.
@@ -498,7 +501,7 @@ static lv_obj_t *makeProviderPanel(const char *title, uint8_t provider, int y, i
     lv_obj_set_style_img_recolor(providerIcon, C(0xFFFFFF), 0);
     lv_obj_set_style_img_recolor_opa(providerIcon, 180, 0);
   }
-  lv_obj_t *heading = label(panel, title, &lv_font_montserrat_20, C(0xFFFFFF)); lv_obj_set_pos(heading, innerX + 31, 2);
+  lv_obj_t *heading = label(panel, title, &lv_font_montserrat_20, C(0xFFFFFF)); lv_obj_set_pos(heading, innerX + 25, 2);
   providerStatusLabels[provider] = label(panel, "WAITING", &lv_font_montserrat_12, C(0x888888)); lv_obj_align(providerStatusLabels[provider], LV_ALIGN_TOP_RIGHT, -innerX, 6);
   lv_obj_t *divider = lv_obj_create(panel); lv_obj_set_size(divider, innerWidth, 1); lv_obj_set_pos(divider, innerX, 28);
   lv_obj_set_style_bg_color(divider, C(0x3A3A3A), 0); lv_obj_set_style_bg_opa(divider, LV_OPA_COVER, 0); lv_obj_set_style_border_width(divider, 0, 0); lv_obj_set_style_pad_all(divider, 0, 0);
@@ -517,7 +520,10 @@ void displayBegin(const AppConfig &config) {
   static lv_disp_drv_t displayDriver; lv_disp_drv_init(&displayDriver); displayDriver.hor_res = 480; displayDriver.ver_res = 480;
   displayDriver.flush_cb = flush; displayDriver.draw_buf = &drawBuf; lv_disp_drv_register(&displayDriver);
   static lv_indev_drv_t inputDriver; lv_indev_drv_init(&inputDriver); inputDriver.type = LV_INDEV_TYPE_POINTER;
-  inputDriver.read_cb = readTouch; inputDriver.long_press_time = 900; lv_indev_drv_register(&inputDriver);
+  inputDriver.read_cb = readTouch; inputDriver.long_press_time = 900;
+  touchInputDevice = lv_indev_drv_register(&inputDriver);
+  touchLastCallbackMs = millis();
+  Serial.printf("[touch][lvgl] Input device registration: %s\n", touchInputDevice ? "ready" : "FAILED");
 
   lv_obj_set_style_bg_color(lv_scr_act(), C(0x000000), 0); lv_obj_set_style_bg_opa(lv_scr_act(), LV_OPA_COVER, 0);
   lv_obj_add_flag(lv_scr_act(), LV_OBJ_FLAG_CLICKABLE);
@@ -577,6 +583,14 @@ void displayBegin(const AppConfig &config) {
 
 void displayLoop() {
   lv_timer_handler();
+  // Some LVGL builds register the input timer successfully but never schedule
+  // its callback. Keep LVGL's complete pointer-event processing intact by
+  // invoking that same public timer callback when it has been idle too long.
+  uint32_t now = millis();
+  if (touchInputDevice && now - touchLastCallbackMs >= 40) {
+    touchFallbackReads++;
+    lv_indev_read_timer_cb(touchInputDevice->driver->read_timer);
+  }
   // Process the raw gesture only after LVGL has finished its input callback.
   // This avoids relying on object hit-testing and avoids changing the object
   // tree while LVGL is still reading the GT911 input device.
@@ -600,8 +614,9 @@ TouchDiagnostics displayGetTouchDiagnostics() {
   diagnostics.controller = touchAddress ? "GT911" : touchPossibleGsl3680 ? "possible GSL3680" : "none";
   if (touchAddress) {
     if (touchStateReadErrors > 0 && touchStateReads == 0) diagnostics.status = "GT911 detected, but state reads fail";
-    else if (touchPointFrames > 0) diagnostics.status = "Touch data received";
+    else if (touchPointFrames > 0) diagnostics.status = touchFallbackReads > 0 ? "Touch data received via LVGL fallback" : "Touch data received";
     else if (touchReadyFrames > 0) diagnostics.status = "Ready frames received, but no point data";
+    else if (touchFallbackReads > 0) diagnostics.status = "GT911 polling active; no touch frame received yet";
     else diagnostics.status = "GT911 detected; no touch frame received yet";
   } else if (touchPossibleGsl3680) diagnostics.status = "No GT911; possible GSL3680 detected at 0x40";
   else if (touchBusDevices == "none") diagnostics.status = "No I2C device detected on touch bus";
@@ -616,6 +631,7 @@ TouchDiagnostics displayGetTouchDiagnostics() {
   diagnostics.rawX = touchRawX; diagnostics.rawY = touchRawY;
   diagnostics.displayX = touchX; diagnostics.displayY = touchY;
   diagnostics.callbackCalls = touchCallbackCalls;
+  diagnostics.fallbackReads = touchFallbackReads;
   diagnostics.probeAttempts = touchProbeAttempts;
   diagnostics.polls = touchPolls;
   diagnostics.stateReads = touchStateReads;
