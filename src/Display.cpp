@@ -49,7 +49,7 @@ static void makeCard(int i,int y,const char *provider,const char *window,lv_colo
   resetLabels[i]=label(c,"Not configured",&lv_font_montserrat_14,lv_color_hex(0x818C99)); lv_obj_align(resetLabels[i],LV_ALIGN_BOTTOM_LEFT,2,2);
 }
 void displayBegin() {
-  pinMode(38,OUTPUT); analogWriteFrequency(150); displaySetBrightness(85); gfx->begin(12000000); gfx->fillScreen(BLACK); touch.begin(); touch.setRotation(ROTATION_NORMAL);
+  pinMode(38,OUTPUT); digitalWrite(38,HIGH); gfx->begin(12000000); gfx->fillScreen(BLACK); touch.begin(); touch.setRotation(ROTATION_NORMAL);
   lv_init(); buf=(lv_color_t*)heap_caps_malloc(480*32*sizeof(lv_color_t),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT); lv_disp_draw_buf_init(&drawBuf,buf,nullptr,480*32);
   static lv_disp_drv_t dd; lv_disp_drv_init(&dd); dd.hor_res=480; dd.ver_res=480; dd.flush_cb=flush; dd.draw_buf=&drawBuf; lv_disp_drv_register(&dd);
   static lv_indev_drv_t id; lv_indev_drv_init(&id); id.type=LV_INDEV_TYPE_POINTER; id.read_cb=readTouch; lv_indev_drv_register(&id);
@@ -60,6 +60,11 @@ void displayBegin() {
   lv_obj_t *hint=label(lv_scr_act(),"Tap a card for details  •  Configure at espusage.local",&lv_font_montserrat_14,lv_color_hex(0x5F6976)); lv_obj_align(hint,LV_ALIGN_BOTTOM_MID,0,-14);
 }
 void displayLoop(){lv_timer_handler();}
-void displaySetBrightness(uint8_t v){analogWrite(38,map(constrain(v,0,100),0,100,0,255));}
+// GPIO38 drives a board-specific backlight controller. Arduino-ESP32's generic
+// analogWrite cannot produce EspControl's proven 150 Hz at its default LEDC
+// resolution and leaves the backlight off. Keep it reliably on until a dedicated
+// low-frequency LEDC channel implementation is added.
+void displaySetBrightness(uint8_t v){digitalWrite(38,v?HIGH:LOW);}
 void displaySetNetwork(const String &s,bool ok){if(!networkLabel)return;lv_label_set_text(networkLabel,s.c_str());lv_obj_set_style_text_color(networkLabel,lv_color_hex(ok?0x49D69A:0xF5A524),0);}
 void displayUpdate(const UsageSnapshot &c,const UsageSnapshot &u){snapshots[0]=c;snapshots[1]=u;UsageSnapshot a[2]={c,u};for(int j=0;j<2;j++){int i=j*2;float p=a[j].primary.usedPercent;lv_label_set_text(values[i],p<0?"--%":(String(p,0)+"%").c_str());lv_bar_set_value(bars[i],p<0?0:(int)p,LV_ANIM_ON);lv_label_set_text(resetLabels[i],(a[j].primary.resetText.length()?a[j].primary.resetText:a[j].status).c_str());}}
+
