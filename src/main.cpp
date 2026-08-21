@@ -9,6 +9,56 @@
 static AppConfig config; static CodexProvider codex; static CursorProvider cursor; static UsageSnapshot cs,us; static uint32_t lastFetch=0;
 static volatile uint8_t lastDisconnectReason=0;
 static String startupNetworkText="STARTING"; static bool startupNetworkConnected=false;
+
+struct CodexPaceBucket { uint32_t slot = 0; float delta = 0; bool valid = false; };
+static CodexPaceBucket codexPace[6];
+static bool codexLastValid = false;
+static float codexLastWeekly = -1;
+
+static void clearCodexPace() {
+  for (CodexPaceBucket &bucket : codexPace) bucket = CodexPaceBucket();
+}
+
+static void updateCodexPace(UsageSnapshot &snapshot) {
+  RecentUsage30m &recent = snapshot.recent30m;
+  time_t now = time(nullptr);
+  if (now < 1700000000) { recent.status = "waiting for clock"; return; }
+  float weekly = snapshot.secondary.usedPercent;
+  if (weekly < 0) { recent.status = "weekly data missing"; return; }
+
+  uint32_t slot = (uint32_t)now / 300U;
+  CodexPaceBucket &current = codexPace[slot % 6];
+  if (!current.valid || current.slot != slot) { current.slot = slot; current.delta = 0; current.valid = true; }
+  bool resetDetected = codexLastValid && weekly + 0.05f < codexLastWeekly;
+  if (resetDetected) {
+    clearCodexPace();
+    CodexPaceBucket &resetBucket = codexPace[slot % 6];
+    resetBucket.slot = slot; resetBucket.valid = true;
+    Serial.printf("[usage][codex][30m] Weekly reset detected: %.1f -> %.1f\n", codexLastWeekly, weekly);
+  } else if (codexLastValid) {
+    float delta = weekly - codexLastWeekly;
+    if (delta > 0) codexPace[slot % 6].delta += delta;
+  }
+  codexLastWeekly = weekly; codexLastValid = true;
+
+  recent.available = true;
+  uint8_t validCount = 0;
+  uint32_t firstSlot = slot >= 5 ? slot - 5 : 0;
+  for (uint8_t i = 0; i < 6; ++i) {
+    uint32_t wanted = firstSlot + i;
+    CodexPaceBucket &source = codexPace[wanted % 6];
+    if (source.valid && source.slot == wanted) {
+      recent.buckets[i].valid = true;
+      recent.buckets[i].deltaPercent = source.delta;
+      recent.deltaPercent += source.delta;
+      validCount++;
+    }
+  }
+  recent.ready = validCount == 6;
+  recent.status = resetDetected ? "reset detected" : recent.ready ? "online" : "collecting " + String(validCount) + "/6";
+  Serial.printf("[usage][codex][30m] delta=%.2f pp, samples=%u/6, status=%s\n",
+                recent.deltaPercent, validCount, recent.status.c_str());
+}
 static void startRecoveryAp(const char *name){
   WiFi.disconnect(false,false);delay(150);WiFi.mode(WIFI_AP_STA);bool ok=WiFi.softAP(name);
   Serial.printf("[wifi][setup] AP '%s': %s\n",name,ok?"started":"FAILED");
@@ -43,4 +93,13 @@ static bool connectWifi(){
   }
 }
 void setup(){Serial.begin(115200);delay(300);Serial.println("\n[boot] ESP Usage starting");loadConfig(config);Serial.printf("[config][nvs] Cursor: enabled=%s, token=%s\n",config.cursor.enabled?"yes":"no",config.cursor.token.length()?"stored":"missing");Serial.printf("[config][nvs] Codex: enabled=%s, access_token=%s, account_id=%s, mode=%s\n",config.codex.enabled?"yes":"no",config.codex.token.length()?"stored":"missing",config.codex.accountId.length()?"stored":"missing",config.codex.endpoint.length()?"adapter":"direct");bool connected=connectWifi();displayBegin(config);displaySetBrightness(config.brightness);displaySetNetwork(startupNetworkText,startupNetworkConnected);webBegin(config,!connected);Serial.println("[boot] Web portal ready");}
-void loop(){displayLoop();webLoop();if(WiFi.status()==WL_CONNECTED&&(lastFetch==0||millis()-lastFetch>(uint32_t)config.refreshMinutes*60000UL)){lastFetch=millis();Serial.println("[usage] Refreshing Codex and Cursor");cs=codex.fetch(config.codex,config.verifyTls);Serial.printf("[usage][codex] %s\n",cs.status.c_str());us=cursor.fetch(config.cursor,config.verifyTls);Serial.printf("[usage][cursor] %s\n",us.status.c_str());displayUpdate(cs,us,config.warningPercent,config.criticalPercent);}delay(5);}
+void loop(){
+  displayLoop(); webLoop();
+  if(WiFi.status()==WL_CONNECTED&&(lastFetch==0||millis()-lastFetch>(uint32_t)config.refreshMinutes*60000UL)){
+    lastFetch=millis(); Serial.println("[usage] Refreshing Codex and Cursor");
+    cs=codex.fetch(config.codex,config.verifyTls); updateCodexPace(cs); Serial.printf("[usage][codex] %s\n",cs.status.c_str());
+    us=cursor.fetch(config.cursor,config.verifyTls); Serial.printf("[usage][cursor] %s\n",us.status.c_str());
+    displayUpdate(cs,us,config.warningPercent,config.criticalPercent); webUpdateUsage(cs,us);
+  }
+  delay(5);
+}

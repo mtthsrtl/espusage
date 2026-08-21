@@ -4,13 +4,15 @@ Native, standalone firmware for the 4-inch GUITION ESP32-S3 4848S040 (480×480).
 
 ## What is included
 
-- Modern 480×480 LVGL dashboard with selectable framed or open/frameless design, individually selectable progress bars, reset-period pace markers, status colors, and tap-to-open detail overlays
+- Modern 480×480 LVGL dashboard with selectable framed or flat design, individually selectable rows, wide progress bars, reset-period pace markers, and status colors
+- Touch operation: short tap switches the whole dashboard between `USED` and `AVAILABLE`; long press opens details for the selected limit or 30-minute row
+- Six 5-minute activity buckets for Cursor tokens/calls and Codex weekly-limit changes
 - ST7701S RGB panel, GT911 touch, 150 Hz PWM backlight, octal PSRAM, and 16 MB flash configuration
 - Wi-Fi station mode plus automatic setup/recovery AP (`ESPUsage-Setup`)
 - Browser-based Wi-Fi scan, network selection, password entry, and NVS-backed reset/reconfiguration
 - Local web configuration at `http://espusage.local/` or the IP shown on screen
 - Credentials saved only at runtime in ESP32 NVS; no secrets are compiled into the firmware or returned by diagnostics
-- Browser-upload OTA page, dual OTA partitions, `/api/health`, and redacted `/api/status`
+- Browser-upload OTA page, dual OTA partitions, `/api/health`, redacted `/api/status`, and credential-free live `/api/usage`
 - Separate transport, Codex adapter, and Cursor provider modules
 
 The display pinout is based on the working [EspControl 4848S040 hardware definition](https://github.com/jtenniswood/espcontrol/blob/main/devices/guition-esp32-s3-4848s040/device/device.yaml): RGB data pins, GPIO 39/48/47 panel control, GPIO 18/17/16/21 timing, GPIO 19/45 GT911, and GPIO 38 backlight. The Arduino_GFX timings use the field-tested 10/8/50 horizontal and 10/8/20 vertical porch/pulse values.
@@ -40,13 +42,13 @@ Do **not** install this firmware through EspControl's existing web updater. EspC
 6. Start the first upload with PlatformIO's **Upload** task (bottom status bar arrow), or open the PlatformIO terminal in the repository and run:
 
    ```powershell
-   pio run -e guition-4848s040 -t upload
+   & "$env:USERPROFILE\.platformio\penv\Scripts\pio.exe" run -e guition-4848s040 -t upload
    ```
 
    For the requested Windows port `COM8`, the exact command is:
 
    ```powershell
-   pio run -e guition-4848s040 -t upload --upload-port COM8
+   & "$env:USERPROFILE\.platformio\penv\Scripts\pio.exe" run -e guition-4848s040 -t upload --upload-port COM8
    ```
 
 7. If the connection times out: hold **BOOT**, briefly press **RESET**, release **BOOT** after one second, and run Upload again. Some enclosures expose only reset; in that case unplug USB, hold BOOT while reconnecting, then release it.
@@ -62,7 +64,7 @@ The USB upload writes the bootloader, partition table, OTA metadata, and applica
 1. Build a new image using PlatformIO **Build**, or:
 
    ```powershell
-   pio run -e guition-4848s040
+   & "$env:USERPROFILE\.platformio\penv\Scripts\pio.exe" run -e guition-4848s040
    ```
 
 2. Open `http://espusage.local/`, go to **Firmware update**, and select:
@@ -96,9 +98,15 @@ This direct route is **undocumented and unsupported** and may stop working. As a
 
 The adapter URL and optional bearer token are runtime-only NVS values.
 
+The Codex **Last 30 min** row is calculated locally from changes to the weekly percentage. It shows six 5-minute buckets and their total as percentage points (`+1.80 PP`). The history intentionally remains in RAM to avoid needless flash writes, so it starts at `COLLECTING` after every reboot. A detected weekly-limit reset clears the collection automatically. The Codex 5-hour row defaults to disabled after a one-time display-settings migration and can be enabled again in the web UI.
+
+The firmware deliberately does not use OpenAI's [organization Usage API](https://developers.openai.com/api/reference/resources/admin/subresources/organization/subresources/usage). That API requires an organization admin key and measures OpenAI API organization usage; it does not represent the consumer Codex/ChatGPT subscription gauges shown here.
+
 ### Cursor
 
-Cursor officially documents an [Admin API](https://cursor.com/docs/account/teams/admin-api) for team usage. It requires a Team/Enterprise admin API key. For an individual account, this firmware can instead use the session/auth token with `GET https://cursor.com/api/usage-summary`. On Windows, `E:\Cursor_Usage` reads it from `%APPDATA%\Cursor\User\globalStorage\state.vscdb`, table `ItemTable`, key `cursorAuth/accessToken`. The firmware accepts either that raw JWT or an existing `sub::JWT`/`WorkosCursorSessionToken` value. This endpoint and cookie flow are **undocumented and unsupported by Cursor** and may change without notice. The token is stored only in ESP32 NVS.
+Cursor officially documents an [Admin API](https://docs.cursor.com/en/account/teams/admin-api) for team usage. It requires a Team/Enterprise admin API key. For an individual account, this firmware can instead use the session/auth token with `GET https://cursor.com/api/usage-summary`. On Windows, `E:\Cursor_Usage` reads it from `%APPDATA%\Cursor\User\globalStorage\state.vscdb`, table `ItemTable`, key `cursorAuth/accessToken`. The firmware accepts either that raw JWT or an existing `sub::JWT`/`WorkosCursorSessionToken` value. This endpoint and cookie flow are **undocumented and unsupported by Cursor** and may change without notice. The token is stored only in ESP32 NVS.
+
+For **Last 30 min**, the firmware also reads the personal dashboard's undocumented `POST /api/dashboard/get-filtered-usage-events` route. It processes timestamp, model, call kind/Max Mode, input/output/cache-read/cache-write tokens, and cost when present. Results include total tokens, calls, token split, cost, top model, and six 5-minute buckets. Pages are read in groups of 50 and capped at 500 events; reaching the cap or losing a later page marks the result as partial. If only some events expose tokens, a `+` is shown after the token total; if none do, the six bars fall back to call counts. The web UI states the token coverage explicitly.
 
 The display maps the currently observed response fields as follows:
 
@@ -106,7 +114,9 @@ The display maps the currently observed response fields as follows:
 - Other Models: `individualUsage.plan.apiPercentUsed`
 - On Demand: percentage calculated from `individualUsage.onDemand.used` and `.limit` (with `teamUsage.onDemand` as a fallback)
 
-All three Cursor cards use `billingCycleStart` and `billingCycleEnd` for the remaining reset time and white elapsed-period marker. Codex uses each rate-limit window's duration and reset time for the same marker; adapters can supply `elapsed_percent`. Under **Display and status**, choose **Panels** for the original framed dashboard or **Open** for a frameless layout with wider bars and larger typography. Every one of the five rows can also be enabled or disabled, and both layouts compact automatically. The implementation is isolated in `src/providers/CursorProvider.cpp` so a future schema change does not affect the display, storage, or Codex provider.
+All three Cursor limits use `billingCycleStart` and `billingCycleEnd` for the remaining reset time and white elapsed-period marker. Codex uses each rate-limit window's duration and reset time for the same marker; adapters can supply `elapsed_percent`. Under **Display and status**, choose **Panels** for framed provider sections or **Flat** for open sections with a neutral divider, wider bars, and larger typography. Each normal limit and both 30-minute rows can be enabled separately; the layout compacts automatically for every combination.
+
+In `USED` mode a normal bar fills from the left with the consumed percentage. In `AVAILABLE` mode the displayed value is `100 − used` and the bar fills from the right; for example, 10% available occupies the rightmost 10%. The white pace marker is read as the remaining time from the right in that mode. The activity mini-charts always show consumption and are never inverted. A short tap anywhere switches modes. A long press on a limit opens Used, Available, Reset, elapsed period, and provider status; a long press on a 30-minute row opens its token split or Codex sample details. `USED` is restored after restart and is not stored in NVS.
 
 ## Security notes
 
@@ -120,7 +130,7 @@ All three Cursor cards use `billingCycleStart` and `billingCycleEnd` for the rem
 ## Build
 
 ```powershell
-pio run -e guition-4848s040
+& "$env:USERPROFILE\.platformio\penv\Scripts\pio.exe" run -e guition-4848s040
 ```
 
 Tested with PlatformIO `espressif32@6.12.0`, Arduino-ESP32 2.0.17, Arduino_GFX 1.6.0, LVGL 8.4.0, TAMC_GT911 1.0.2, and ArduinoJson 7.4.2.
@@ -132,6 +142,7 @@ Tested with PlatformIO `espressif32@6.12.0`, Arduino-ESP32 2.0.17, Arduino_GFX 1
 | `/` | GET | Configuration and OTA UI |
 | `/api/health` | GET | Minimal liveness response |
 | `/api/status` | GET | Redacted runtime/debug status |
+| `/api/usage` | GET | Current sanitized provider limits and 30-minute buckets; never credentials |
 | `/api/config` | POST | Save settings to NVS and restart |
 | `/api/wifi/scan` | GET | Scan nearby Wi-Fi networks |
 | `/api/wifi` | POST | Save selected Wi-Fi credentials and restart |

@@ -4,78 +4,399 @@
 #include <TAMC_GT911.h>
 #include <lvgl.h>
 
-static Arduino_DataBus *bus=new Arduino_SWSPI(GFX_NOT_DEFINED,39,48,47,GFX_NOT_DEFINED);
-static Arduino_ESP32RGBPanel *rgb=new Arduino_ESP32RGBPanel(18,17,16,21,11,12,13,14,0,8,20,3,46,9,10,4,5,6,7,15,1,10,8,50,1,10,8,20,0,10000000,false,0,0,0);
-static Arduino_RGB_Display *gfx=new Arduino_RGB_Display(480,480,rgb,0,true,bus,GFX_NOT_DEFINED,st7701_type9_init_operations,sizeof(st7701_type9_init_operations));
+static Arduino_DataBus *bus = new Arduino_SWSPI(GFX_NOT_DEFINED, 39, 48, 47, GFX_NOT_DEFINED);
+static Arduino_ESP32RGBPanel *rgb = new Arduino_ESP32RGBPanel(18,17,16,21,11,12,13,14,0,8,20,3,46,9,10,4,5,6,7,15,1,10,8,50,1,10,8,20,0,10000000,false,0,0,0);
+static Arduino_RGB_Display *gfx = new Arduino_RGB_Display(480,480,rgb,0,true,bus,GFX_NOT_DEFINED,st7701_type9_init_operations,sizeof(st7701_type9_init_operations));
 static TAMC_GT911 touch(19,45,41,42,480,480);
-static lv_disp_draw_buf_t drawBuf; static lv_color_t *drawMemory;
-static lv_obj_t *networkLabel,*statusLabels[5],*values[5],*bars[5],*paceMarkers[5],*resetLabels[5],*rows[5];
-static int barWidths[5],markerY[5];
-static String rowNames[5]={"CURSOR MODELS","OTHER MODELS","ON DEMAND","5-HOUR LIMIT","WEEKLY LIMIT"};
-static UsageWindow rowData[5]; static String rowStatus[5]; static String networkAddress;
+static lv_disp_draw_buf_t drawBuf;
+static lv_color_t *drawMemory;
 
-static lv_color_t C(uint32_t v){return lv_color_hex(v);}
-static lv_obj_t *label(lv_obj_t *p,const char *s,const lv_font_t *f,lv_color_t c){lv_obj_t *o=lv_label_create(p);lv_label_set_text(o,s);lv_obj_set_style_text_font(o,f,0);lv_obj_set_style_text_color(o,c,0);return o;}
-static void flush(lv_disp_drv_t *d,const lv_area_t *a,lv_color_t *p){gfx->draw16bitRGBBitmap(a->x1,a->y1,(uint16_t*)&p->full,a->x2-a->x1+1,a->y2-a->y1+1);lv_disp_flush_ready(d);}
-static void readTouch(lv_indev_drv_t*,lv_indev_data_t *d){touch.read();if(touch.isTouched&&touch.touches){d->state=LV_INDEV_STATE_PR;d->point.x=479-touch.points[0].x;d->point.y=479-touch.points[0].y;}else d->state=LV_INDEV_STATE_REL;}
-static void panel(lv_obj_t *o){lv_obj_set_style_bg_color(o,C(0x101010),0);lv_obj_set_style_bg_opa(o,LV_OPA_COVER,0);lv_obj_set_style_border_width(o,1,0);lv_obj_set_style_border_color(o,C(0x303030),0);lv_obj_set_style_radius(o,14,0);lv_obj_clear_flag(o,LV_OBJ_FLAG_SCROLLABLE);}
-static void closeModal(lv_event_t *e){lv_obj_del((lv_obj_t*)lv_event_get_user_data(e));}
-static void details(lv_event_t *e){
-  int i=(int)(intptr_t)lv_event_get_user_data(e);lv_obj_t *m=lv_obj_create(lv_scr_act());lv_obj_set_size(m,430,300);lv_obj_center(m);panel(m);lv_obj_set_style_pad_all(m,22,0);
-  lv_obj_t *t=label(m,rowNames[i].c_str(),&lv_font_montserrat_24,C(0xF4F4F4));lv_obj_align(t,LV_ALIGN_TOP_LEFT,0,0);
-  String value=rowData[i].usedPercent<0?"No usage data":String(rowData[i].usedPercent,1)+"% used";
-  String body=value+"\n\n"+rowData[i].resetText+"\n\nProvider: "+rowStatus[i];
-  lv_obj_t *b=label(m,body.c_str(),&lv_font_montserrat_16,C(0xB8B8B8));lv_obj_set_width(b,380);lv_obj_align(b,LV_ALIGN_TOP_LEFT,0,55);
-  lv_obj_t *x=lv_btn_create(m);lv_obj_set_size(x,110,44);lv_obj_align(x,LV_ALIGN_BOTTOM_RIGHT,0,0);lv_obj_set_style_bg_color(x,C(0x252525),0);lv_obj_t *xl=label(x,"CLOSE",&lv_font_montserrat_14,C(0xFFFFFF));lv_obj_center(xl);lv_obj_add_event_cb(x,closeModal,LV_EVENT_CLICKED,m);
+static lv_obj_t *networkLabel, *modeLabel, *providerStatusLabels[2];
+static lv_obj_t *statusLabels[5], *values[5], *bars[5], *paceMarkers[5], *resetLabels[5], *rows[5];
+static lv_obj_t *paceRows[2], *paceValues[2], *paceMeta[2], *paceColumns[2][6];
+static int barWidths[5], markerY[5];
+static String rowNames[5] = {"CURSOR MODELS","OTHER MODELS","ON DEMAND","5-HOUR LIMIT","WEEKLY LIMIT"};
+static UsageWindow rowData[5];
+static String rowStatus[5], networkAddress;
+static UsageSnapshot latestCodex, latestCursor;
+static bool availableView = false;
+static uint8_t warningLevel = 70, criticalLevel = 90;
+
+static lv_color_t C(uint32_t value) { return lv_color_hex(value); }
+
+static lv_obj_t *label(lv_obj_t *parent, const char *text, const lv_font_t *font, lv_color_t color) {
+  lv_obj_t *object = lv_label_create(parent);
+  lv_label_set_text(object, text);
+  lv_obj_set_style_text_font(object, font, 0);
+  lv_obj_set_style_text_color(object, color, 0);
+  return object;
 }
-static void makeUsageRow(lv_obj_t *parent,int i,int y,bool openStyle){
-  int width=openStyle?448:410,rowHeight=openStyle?56:50,barY=openStyle?25:20,barHeight=openStyle?9:7,resetY=openStyle?39:31;
-  barWidths[i]=width;markerY[i]=barY-2;
-  lv_obj_t *row=lv_obj_create(parent);lv_obj_set_size(row,width,rowHeight);lv_obj_set_pos(row,0,y);lv_obj_set_style_bg_opa(row,LV_OPA_TRANSP,0);lv_obj_set_style_border_width(row,0,0);lv_obj_set_style_pad_all(row,0,0);lv_obj_clear_flag(row,LV_OBJ_FLAG_SCROLLABLE);lv_obj_add_flag(row,LV_OBJ_FLAG_CLICKABLE);lv_obj_add_event_cb(row,details,LV_EVENT_CLICKED,(void*)(intptr_t)i);
-  rows[i]=row;
-  lv_obj_t *n=label(row,rowNames[i].c_str(),openStyle?&lv_font_montserrat_16:&lv_font_montserrat_12,C(0xF2F2F2));lv_obj_set_pos(n,0,0);
-  statusLabels[i]=label(row,"WAITING",&lv_font_montserrat_12,C(0x888888));lv_obj_align(statusLabels[i],LV_ALIGN_TOP_RIGHT,-62,0);
-  values[i]=label(row,"--%",openStyle?&lv_font_montserrat_20:&lv_font_montserrat_16,C(0xF2F2F2));lv_obj_align(values[i],LV_ALIGN_TOP_RIGHT,0,openStyle?-2:0);
-  bars[i]=lv_bar_create(row);lv_obj_set_size(bars[i],width,barHeight);lv_obj_set_pos(bars[i],0,barY);lv_bar_set_range(bars[i],0,100);lv_obj_set_style_bg_color(bars[i],C(0x282828),LV_PART_MAIN);lv_obj_set_style_bg_opa(bars[i],LV_OPA_COVER,LV_PART_MAIN);lv_obj_set_style_radius(bars[i],4,LV_PART_MAIN);lv_obj_set_style_radius(bars[i],4,LV_PART_INDICATOR);
-  paceMarkers[i]=lv_obj_create(row);lv_obj_set_size(paceMarkers[i],3,barHeight+4);lv_obj_set_pos(paceMarkers[i],0,markerY[i]);lv_obj_set_style_bg_color(paceMarkers[i],C(0xFFFFFF),0);lv_obj_set_style_bg_opa(paceMarkers[i],LV_OPA_COVER,0);lv_obj_set_style_border_width(paceMarkers[i],0,0);lv_obj_set_style_radius(paceMarkers[i],1,0);lv_obj_set_style_pad_all(paceMarkers[i],0,0);lv_obj_clear_flag(paceMarkers[i],LV_OBJ_FLAG_SCROLLABLE);lv_obj_add_flag(paceMarkers[i],LV_OBJ_FLAG_HIDDEN);
-  resetLabels[i]=label(row,"Waiting for usage data",&lv_font_montserrat_12,C(0x929292));lv_obj_set_pos(resetLabels[i],0,resetY);
+
+static void flush(lv_disp_drv_t *driver, const lv_area_t *area, lv_color_t *pixels) {
+  gfx->draw16bitRGBBitmap(area->x1, area->y1, (uint16_t *)&pixels->full,
+                          area->x2 - area->x1 + 1, area->y2 - area->y1 + 1);
+  lv_disp_flush_ready(driver);
 }
-static lv_obj_t *makeProviderPanel(const char *title,int y,int height,bool openStyle){
-  lv_obj_t *p=lv_obj_create(lv_scr_act());lv_obj_set_size(p,openStyle?464:440,height);lv_obj_set_pos(p,openStyle?8:20,y);
-  if(openStyle){lv_obj_set_style_bg_opa(p,LV_OPA_TRANSP,0);lv_obj_set_style_border_width(p,0,0);lv_obj_clear_flag(p,LV_OBJ_FLAG_SCROLLABLE);lv_obj_set_style_pad_all(p,8,0);}else{panel(p);lv_obj_set_style_pad_all(p,14,0);}
-  lv_obj_t *heading=label(p,title,openStyle?&lv_font_montserrat_24:&lv_font_montserrat_20,C(0xFFFFFF));lv_obj_set_pos(heading,0,openStyle?-5:-3);return p;
+
+static void readTouch(lv_indev_drv_t *, lv_indev_data_t *data) {
+  static bool wasPressed = false;
+  static int lastX = 0, lastY = 0;
+  touch.read();
+  bool pressed = touch.isTouched && touch.touches;
+  if (pressed) {
+    // TAMC_GT911 already applies ROTATION_NORMAL. The old code mirrored both axes
+    // a second time here, so visual rows and touch hit areas did not line up.
+    lastX = constrain((int)touch.points[0].x, 0, 479);
+    lastY = constrain((int)touch.points[0].y, 0, 479);
+    data->state = LV_INDEV_STATE_PR;
+    data->point.x = lastX;
+    data->point.y = lastY;
+    if (!wasPressed) Serial.printf("[touch] down x=%d y=%d\n", lastX, lastY);
+  } else {
+    data->state = LV_INDEV_STATE_REL;
+    data->point.x = lastX;
+    data->point.y = lastY;
+    if (wasPressed) Serial.printf("[touch] up x=%d y=%d\n", lastX, lastY);
+  }
+  wasPressed = pressed;
 }
-void displayBegin(const AppConfig &config){
-  pinMode(38,OUTPUT);digitalWrite(38,HIGH);gfx->begin(10000000);gfx->fillScreen(BLACK);touch.begin();touch.setRotation(ROTATION_NORMAL);
-  lv_init();drawMemory=(lv_color_t*)heap_caps_malloc(480*32*sizeof(lv_color_t),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);lv_disp_draw_buf_init(&drawBuf,drawMemory,nullptr,480*32);
-  static lv_disp_drv_t dd;lv_disp_drv_init(&dd);dd.hor_res=480;dd.ver_res=480;dd.flush_cb=flush;dd.draw_buf=&drawBuf;lv_disp_drv_register(&dd);
-  static lv_indev_drv_t id;lv_indev_drv_init(&id);id.type=LV_INDEV_TYPE_POINTER;id.read_cb=readTouch;lv_indev_drv_register(&id);
-  lv_obj_set_style_bg_color(lv_scr_act(),C(0x000000),0);lv_obj_set_style_bg_opa(lv_scr_act(),LV_OPA_COVER,0);
-  lv_obj_t *title=label(lv_scr_act(),"AI USAGE",&lv_font_montserrat_20,C(0xFFFFFF));lv_obj_set_pos(title,20,15);
-  networkLabel=label(lv_scr_act(),"STARTING",&lv_font_montserrat_12,C(0xF2A93B));lv_obj_align(networkLabel,LV_ALIGN_TOP_RIGHT,-20,20);
-  bool openStyle=config.displayStyle==1;
-  bool visible[5]={config.showCursorModels,config.showCursorOther,config.showCursorOnDemand,config.showCodexFiveHour,config.showCodexWeekly};
-  int cursorCount=visible[0]+visible[1]+visible[2],codexCount=visible[3]+visible[4];
-  int rowStep=openStyle?58:52,panelBase=openStyle?48:64,panelGap=openStyle?4:12,panelY=openStyle?48:50,rowStart=openStyle?28:30;
-  lv_obj_t *cursorPanel=makeProviderPanel("CURSOR",panelY,panelBase+rowStep*max(cursorCount,1),openStyle);makeUsageRow(cursorPanel,0,rowStart,openStyle);makeUsageRow(cursorPanel,1,rowStart+rowStep,openStyle);makeUsageRow(cursorPanel,2,rowStart+rowStep*2,openStyle);
-  int rowY=rowStart;for(int i=0;i<3;i++){if(visible[i]){lv_obj_set_y(rows[i],rowY);lv_obj_clear_flag(rows[i],LV_OBJ_FLAG_HIDDEN);rowY+=rowStep;}else lv_obj_add_flag(rows[i],LV_OBJ_FLAG_HIDDEN);}
-  if(cursorCount)panelY+=panelBase+rowStep*cursorCount+panelGap;else lv_obj_add_flag(cursorPanel,LV_OBJ_FLAG_HIDDEN);
-  lv_obj_t *codexPanel=makeProviderPanel("CODEX",panelY,panelBase+rowStep*max(codexCount,1),openStyle);makeUsageRow(codexPanel,3,rowStart,openStyle);makeUsageRow(codexPanel,4,rowStart+rowStep,openStyle);
-  rowY=rowStart;for(int i=3;i<5;i++){if(visible[i]){lv_obj_set_y(rows[i],rowY);lv_obj_clear_flag(rows[i],LV_OBJ_FLAG_HIDDEN);rowY+=rowStep;}else lv_obj_add_flag(rows[i],LV_OBJ_FLAG_HIDDEN);}
-  if(!codexCount)lv_obj_add_flag(codexPanel,LV_OBJ_FLAG_HIDDEN);
+
+static void panelStyle(lv_obj_t *object) {
+  lv_obj_set_style_bg_color(object, C(0x101010), 0);
+  lv_obj_set_style_bg_opa(object, LV_OPA_COVER, 0);
+  lv_obj_set_style_border_width(object, 1, 0);
+  lv_obj_set_style_border_color(object, C(0x303030), 0);
+  lv_obj_set_style_radius(object, 12, 0);
+  lv_obj_clear_flag(object, LV_OBJ_FLAG_SCROLLABLE);
 }
-void displayLoop(){lv_timer_handler();}
-void displaySetBrightness(uint8_t v){digitalWrite(38,v?HIGH:LOW);}
-void displaySetNetwork(const String &s,bool connected){networkAddress=connected?s:"";if(!networkLabel)return;lv_label_set_text(networkLabel,s.c_str());lv_obj_set_style_text_color(networkLabel,C(connected?0x45D597:0xF2A93B),0);}
-static void updateRow(int i,const UsageWindow &w,const String &providerStatus,uint8_t warning,uint8_t critical){
-  rowData[i]=w;rowStatus[i]=providerStatus;float p=w.usedPercent;lv_color_t color;String state;
-  if(p<0){color=C(0x7D7D7D);state="NO DATA";}else if(p>=critical){color=C(0xFF4040);state="CRITICAL";}else if(p>=warning){color=C(0xF0A020);state="WARNING";}else{color=C(0x35D078);state="OK";}
-  String valueText=p<0?"--%":String(p,0)+"%";lv_label_set_text(statusLabels[i],state.c_str());lv_obj_set_style_text_color(statusLabels[i],color,0);lv_label_set_text(values[i],valueText.c_str());lv_obj_set_style_text_color(values[i],color,0);lv_obj_set_style_bg_color(bars[i],color,LV_PART_INDICATOR);lv_bar_set_value(bars[i],p<0?0:(int)constrain(p,0,100),LV_ANIM_OFF);
-  if(w.elapsedPercent>=0){int markerX=(int)(constrain(w.elapsedPercent,0.0f,100.0f)*(barWidths[i]-3)/100.0f);lv_obj_set_pos(paceMarkers[i],markerX,markerY[i]);lv_obj_clear_flag(paceMarkers[i],LV_OBJ_FLAG_HIDDEN);lv_obj_move_foreground(paceMarkers[i]);}else lv_obj_add_flag(paceMarkers[i],LV_OBJ_FLAG_HIDDEN);
-  String bottom=w.resetText.length()?w.resetText:providerStatus;if(p<0&&networkAddress.length()&&(providerStatus=="disabled"||providerStatus.indexOf("missing")>=0))bottom="Setup: http://"+networkAddress;lv_label_set_text(resetLabels[i],bottom.c_str());
+
+static uint64_t totalTokens(const RecentUsage30m &recent) {
+  return recent.inputTokens + recent.outputTokens + recent.cacheWriteTokens + recent.cacheReadTokens;
 }
-void displayUpdate(const UsageSnapshot &codex,const UsageSnapshot &cursor,uint8_t warning,uint8_t critical){
-  updateRow(0,cursor.primary,cursor.status,warning,critical);updateRow(1,cursor.secondary,cursor.status,warning,critical);updateRow(2,cursor.tertiary,cursor.status,warning,critical);updateRow(3,codex.primary,codex.status,warning,critical);updateRow(4,codex.secondary,codex.status,warning,critical);
-  Serial.printf("[display] Cursor %.1f / %.1f / %.1f, Codex %.1f / %.1f\n",cursor.primary.usedPercent,cursor.secondary.usedPercent,cursor.tertiary.usedPercent,codex.primary.usedPercent,codex.secondary.usedPercent);
-  lv_obj_invalidate(lv_scr_act());lv_refr_now(nullptr);
+
+static String formatUnsigned(uint64_t value) {
+  char buffer[24];
+  snprintf(buffer, sizeof(buffer), "%llu", (unsigned long long)value);
+  return String(buffer);
+}
+
+static String formatTokens(uint64_t value) {
+  if (value >= 1000000000ULL) return String((double)value / 1000000000.0, 2) + "B";
+  if (value >= 1000000ULL) return String((double)value / 1000000.0, 2) + "M";
+  if (value >= 1000ULL) return String((double)value / 1000.0, 1) + "K";
+  return formatUnsigned(value);
+}
+
+static lv_color_t usageColor(float usedPercent) {
+  if (usedPercent < 0) return C(0x7D7D7D);
+  if (usedPercent >= criticalLevel) return C(0xFF5050);
+  if (usedPercent >= warningLevel) return C(0xF0A020);
+  return C(0x35D078);
+}
+
+static String usageState(float usedPercent) {
+  if (usedPercent < 0) return "NO DATA";
+  if (!availableView) {
+    if (usedPercent >= criticalLevel) return "CRITICAL";
+    if (usedPercent >= warningLevel) return "WARNING";
+    return "OK";
+  }
+  float available = 100.0f - usedPercent;
+  if (available <= 100 - criticalLevel) return "LOW";
+  if (available <= 100 - warningLevel) return "WATCH";
+  return "OK";
+}
+
+static uint8_t validBucketCount(const RecentUsage30m &recent) {
+  uint8_t count = 0;
+  for (const RecentUsageBucket &bucket : recent.buckets) if (bucket.valid) count++;
+  return count;
+}
+
+static void closeModal(lv_event_t *event) {
+  lv_obj_t *backdrop = (lv_obj_t *)lv_event_get_user_data(event);
+  Serial.println("[touch] Details closed");
+  lv_obj_del(backdrop);
+}
+
+static String standardDetails(uint8_t index) {
+  const UsageWindow &window = rowData[index];
+  String body;
+  if (window.usedPercent < 0) body = "No usage data";
+  else {
+    body = "Used: " + String(window.usedPercent, 1) + "%\nAvailable: " + String(100.0f - window.usedPercent, 1) + "%";
+    if (window.elapsedPercent >= 0) {
+      body += "\nPeriod elapsed: " + String(window.elapsedPercent, 1) + "%";
+      body += "\nPeriod remaining: " + String(100.0f - window.elapsedPercent, 1) + "%";
+    }
+  }
+  body += "\n\n" + (window.resetText.length() ? window.resetText : String("Reset unavailable"));
+  body += "\nProvider: " + rowStatus[index];
+  return body;
+}
+
+static String cursorPaceDetails() {
+  const RecentUsage30m &recent = latestCursor.recent30m;
+  String body = "Calls: " + String(recent.calls) + "\nToken data: " + String(recent.tokenizedCalls) + "/" + String(recent.calls) + " calls";
+  body += "\nTotal tokens: " + formatUnsigned(totalTokens(recent));
+  body += "\nInput: " + formatUnsigned(recent.inputTokens) + "\nOutput: " + formatUnsigned(recent.outputTokens);
+  body += "\nCache read: " + formatUnsigned(recent.cacheReadTokens) + "\nCache write: " + formatUnsigned(recent.cacheWriteTokens);
+  if (recent.costCents >= 0) body += "\nCost: $" + String(recent.costCents / 100.0f, 4);
+  if (recent.topModel.length()) body += "\nTop model: " + recent.topModel;
+  if (recent.topKind.length()) body += "\nTop call type: " + recent.topKind;
+  body += "\nMax Mode calls: " + String(recent.maxModeCalls);
+  body += "\n\nStatus: " + (recent.status.length() ? recent.status : String("unavailable"));
+  return body;
+}
+
+static String codexPaceDetails() {
+  const RecentUsage30m &recent = latestCodex.recent30m;
+  String body = "Weekly change: +" + String(recent.deltaPercent, 2) + " pp\nSamples: " + String(validBucketCount(recent)) + "/6\n\n5-minute buckets:";
+  for (uint8_t i = 0; i < 6; ++i) {
+    body += "\n" + String(i + 1) + ": ";
+    body += recent.buckets[i].valid ? "+" + String(recent.buckets[i].deltaPercent, 2) + " pp" : String("no sample");
+  }
+  body += "\n\nStatus: " + (recent.status.length() ? recent.status : String("unavailable"));
+  return body;
+}
+
+static void openDetails(lv_event_t *event) {
+  uint8_t index = (uint8_t)(uintptr_t)lv_event_get_user_data(event);
+  Serial.printf("[touch] long press -> details=%u\n", index);
+  lv_obj_t *backdrop = lv_obj_create(lv_scr_act());
+  lv_obj_set_size(backdrop, 480, 480); lv_obj_set_pos(backdrop, 0, 0);
+  lv_obj_set_style_bg_color(backdrop, C(0x000000), 0); lv_obj_set_style_bg_opa(backdrop, LV_OPA_80, 0);
+  lv_obj_set_style_border_width(backdrop, 0, 0); lv_obj_set_style_pad_all(backdrop, 0, 0);
+  lv_obj_clear_flag(backdrop, LV_OBJ_FLAG_SCROLLABLE); lv_obj_add_flag(backdrop, LV_OBJ_FLAG_CLICKABLE);
+
+  lv_obj_t *modal = lv_obj_create(backdrop);
+  lv_obj_set_size(modal, 438, index < 5 ? 330 : 410); lv_obj_center(modal); panelStyle(modal);
+  lv_obj_set_style_pad_all(modal, 20, 0);
+  const char *titleText = index < 5 ? rowNames[index].c_str() : index == 5 ? "CURSOR / LAST 30 MIN" : "CODEX / LAST 30 MIN";
+  lv_obj_t *title = label(modal, titleText, &lv_font_montserrat_20, C(0xF4F4F4));
+  lv_obj_align(title, LV_ALIGN_TOP_LEFT, 0, 0);
+  String bodyText = index < 5 ? standardDetails(index) : index == 5 ? cursorPaceDetails() : codexPaceDetails();
+  lv_obj_t *body = label(modal, bodyText.c_str(), &lv_font_montserrat_14, C(0xB8B8B8));
+  lv_obj_set_width(body, 390); lv_label_set_long_mode(body, LV_LABEL_LONG_WRAP); lv_obj_align(body, LV_ALIGN_TOP_LEFT, 0, 42);
+  lv_obj_t *close = lv_btn_create(modal);
+  lv_obj_set_size(close, 104, 40); lv_obj_align(close, LV_ALIGN_BOTTOM_RIGHT, 0, 0);
+  lv_obj_set_style_bg_color(close, C(0x252525), 0); lv_obj_set_style_radius(close, 8, 0);
+  lv_obj_t *closeText = label(close, "CLOSE", &lv_font_montserrat_14, C(0xFFFFFF)); lv_obj_center(closeText);
+  lv_obj_add_event_cb(close, closeModal, LV_EVENT_SHORT_CLICKED, backdrop);
+}
+
+static void renderMetric(uint8_t index) {
+  if (!rows[index]) return;
+  const UsageWindow &window = rowData[index];
+  float used = window.usedPercent;
+  float shown = used < 0 ? -1 : availableView ? 100.0f - used : used;
+  lv_color_t color = usageColor(used);
+  String valueText = shown < 0 ? "--%" : String(shown, 0) + "%";
+  String state = usageState(used);
+  lv_label_set_text(statusLabels[index], state.c_str()); lv_obj_set_style_text_color(statusLabels[index], color, 0);
+  lv_label_set_text(values[index], valueText.c_str()); lv_obj_set_style_text_color(values[index], color, 0);
+  lv_obj_set_style_base_dir(bars[index], availableView ? LV_BASE_DIR_RTL : LV_BASE_DIR_LTR, 0);
+  lv_obj_set_style_bg_color(bars[index], color, LV_PART_INDICATOR);
+  lv_bar_set_value(bars[index], shown < 0 ? 0 : (int)constrain(shown, 0, 100), LV_ANIM_OFF);
+
+  if (window.elapsedPercent >= 0) {
+    float elapsed = constrain(window.elapsedPercent, 0.0f, 100.0f);
+    float remaining = 100.0f - elapsed;
+    int markerX = availableView
+      ? (barWidths[index] - 3) - (int)(remaining * (barWidths[index] - 3) / 100.0f)
+      : (int)(elapsed * (barWidths[index] - 3) / 100.0f);
+    lv_obj_set_pos(paceMarkers[index], markerX, markerY[index]);
+    lv_obj_clear_flag(paceMarkers[index], LV_OBJ_FLAG_HIDDEN); lv_obj_move_foreground(paceMarkers[index]);
+  } else lv_obj_add_flag(paceMarkers[index], LV_OBJ_FLAG_HIDDEN);
+
+  String bottom = window.resetText.length() ? window.resetText : rowStatus[index];
+  if (used < 0 && networkAddress.length() && (rowStatus[index] == "disabled" || rowStatus[index].indexOf("missing") >= 0))
+    bottom = "Setup: http://" + networkAddress;
+  lv_label_set_text(resetLabels[index], bottom.c_str());
+}
+
+static void renderPace(uint8_t provider) {
+  if (!paceRows[provider]) return;
+  const RecentUsage30m &recent = provider == 0 ? latestCursor.recent30m : latestCodex.recent30m;
+  String valueText, metaText;
+  bool tokenChart = false;
+  if (provider == 0) {
+    uint64_t tokens = totalTokens(recent);
+    tokenChart = recent.tokenData && tokens > 0;
+    if (!recent.available) valueText = "NO DATA";
+    else if (!recent.calls) valueText = "0 CALLS";
+    else if (recent.tokenData) valueText = formatTokens(tokens) + (recent.tokenizedCalls < recent.calls ? "+ TOK | " : " TOK | ") + String(recent.calls) + " CALLS";
+    else valueText = String(recent.calls) + " CALLS | TOK N/A";
+    metaText = tokenChart ? "TOKENS / 6 x 5 MIN" : "CALLS / 6 x 5 MIN";
+  } else {
+    if (!recent.available) valueText = "NO DATA";
+    else if (!recent.ready) valueText = "COLLECTING " + String(validBucketCount(recent)) + "/6";
+    else valueText = "+" + String(recent.deltaPercent, 2) + " PP";
+    metaText = "WEEKLY CHANGE / 6 x 5 MIN";
+  }
+  lv_label_set_text(paceValues[provider], valueText.c_str());
+  lv_label_set_text(paceMeta[provider], metaText.c_str());
+
+  double maximum = 0;
+  for (uint8_t i = 0; i < 6; ++i) {
+    double amount = provider == 0 ? (tokenChart ? (double)recent.buckets[i].tokens : recent.buckets[i].calls) : recent.buckets[i].deltaPercent;
+    if (recent.buckets[i].valid && amount > maximum) maximum = amount;
+  }
+  for (uint8_t i = 0; i < 6; ++i) {
+    double amount = provider == 0 ? (tokenChart ? (double)recent.buckets[i].tokens : recent.buckets[i].calls) : recent.buckets[i].deltaPercent;
+    int height = !recent.buckets[i].valid ? 2 : maximum <= 0 || amount <= 0 ? 2 : 2 + (int)(16.0 * amount / maximum);
+    lv_obj_set_height(paceColumns[provider][i], height);
+    lv_obj_set_y(paceColumns[provider][i], 39 - height);
+    lv_obj_set_style_bg_opa(paceColumns[provider][i], recent.buckets[i].valid ? LV_OPA_COVER : LV_OPA_20, 0);
+  }
+}
+
+static void renderAll() {
+  lv_label_set_text(modeLabel, availableView ? "AVAILABLE" : "USED");
+  for (uint8_t i = 0; i < 5; ++i) renderMetric(i);
+  renderPace(0); renderPace(1);
+  lv_obj_invalidate(lv_scr_act()); lv_refr_now(nullptr);
+}
+
+static void toggleView(lv_event_t *) {
+  availableView = !availableView;
+  Serial.printf("[touch] short press -> view=%s\n", availableView ? "available" : "used");
+  renderAll();
+}
+
+static void addTouchCallbacks(lv_obj_t *object, uint8_t detailIndex) {
+  lv_obj_add_flag(object, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_add_event_cb(object, toggleView, LV_EVENT_SHORT_CLICKED, nullptr);
+  lv_obj_add_event_cb(object, openDetails, LV_EVENT_LONG_PRESSED, (void *)(uintptr_t)detailIndex);
+}
+
+static void makeUsageRow(lv_obj_t *parent, uint8_t index, int x, int y, int width) {
+  lv_obj_t *row = lv_obj_create(parent);
+  lv_obj_set_size(row, width, 46); lv_obj_set_pos(row, x, y);
+  lv_obj_set_style_bg_opa(row, LV_OPA_TRANSP, 0); lv_obj_set_style_border_width(row, 0, 0);
+  lv_obj_set_style_pad_all(row, 0, 0); lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
+  rows[index] = row; addTouchCallbacks(row, index);
+  lv_obj_t *name = label(row, rowNames[index].c_str(), &lv_font_montserrat_14, C(0xF2F2F2)); lv_obj_set_pos(name, 0, 0);
+  statusLabels[index] = label(row, "WAITING", &lv_font_montserrat_12, C(0x888888)); lv_obj_align(statusLabels[index], LV_ALIGN_TOP_RIGHT, -62, 1);
+  values[index] = label(row, "--%", &lv_font_montserrat_20, C(0xF2F2F2)); lv_obj_align(values[index], LV_ALIGN_TOP_RIGHT, 0, -3);
+  bars[index] = lv_bar_create(row); lv_obj_set_size(bars[index], width, 7); lv_obj_set_pos(bars[index], 0, 19);
+  lv_bar_set_range(bars[index], 0, 100); lv_obj_set_style_bg_color(bars[index], C(0x282828), LV_PART_MAIN);
+  lv_obj_set_style_bg_opa(bars[index], LV_OPA_COVER, LV_PART_MAIN); lv_obj_set_style_radius(bars[index], 3, LV_PART_MAIN); lv_obj_set_style_radius(bars[index], 3, LV_PART_INDICATOR);
+  barWidths[index] = width; markerY[index] = 17;
+  paceMarkers[index] = lv_obj_create(row); lv_obj_set_size(paceMarkers[index], 3, 11); lv_obj_set_pos(paceMarkers[index], 0, markerY[index]);
+  lv_obj_set_style_bg_color(paceMarkers[index], C(0xFFFFFF), 0); lv_obj_set_style_bg_opa(paceMarkers[index], LV_OPA_COVER, 0);
+  lv_obj_set_style_border_width(paceMarkers[index], 0, 0); lv_obj_set_style_radius(paceMarkers[index], 1, 0); lv_obj_set_style_pad_all(paceMarkers[index], 0, 0);
+  lv_obj_clear_flag(paceMarkers[index], LV_OBJ_FLAG_SCROLLABLE); lv_obj_add_flag(paceMarkers[index], LV_OBJ_FLAG_HIDDEN);
+  resetLabels[index] = label(row, "Waiting for usage data", &lv_font_montserrat_12, C(0x929292)); lv_obj_set_pos(resetLabels[index], 0, 29);
+}
+
+static void makePaceRow(lv_obj_t *parent, uint8_t provider, int x, int y, int width) {
+  lv_obj_t *row = lv_obj_create(parent);
+  lv_obj_set_size(row, width, 48); lv_obj_set_pos(row, x, y);
+  lv_obj_set_style_bg_opa(row, LV_OPA_TRANSP, 0); lv_obj_set_style_border_width(row, 0, 0); lv_obj_set_style_pad_all(row, 0, 0);
+  lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE); paceRows[provider] = row; addTouchCallbacks(row, provider == 0 ? 5 : 6);
+  lv_obj_t *topLine = lv_obj_create(row); lv_obj_set_size(topLine, width, 1); lv_obj_set_pos(topLine, 0, 0);
+  lv_obj_set_style_bg_color(topLine, C(0x242424), 0); lv_obj_set_style_bg_opa(topLine, LV_OPA_COVER, 0); lv_obj_set_style_border_width(topLine, 0, 0); lv_obj_set_style_pad_all(topLine, 0, 0);
+  lv_obj_clear_flag(topLine, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_t *title = label(row, "LAST 30 MIN", &lv_font_montserrat_14, C(0xF2F2F2)); lv_obj_set_pos(title, 0, 5);
+  paceValues[provider] = label(row, "WAITING", &lv_font_montserrat_14, C(0xF2F2F2)); lv_obj_align(paceValues[provider], LV_ALIGN_TOP_RIGHT, 0, 5);
+  paceMeta[provider] = label(row, provider == 0 ? "TOKENS / 6 x 5 MIN" : "WEEKLY CHANGE / 6 x 5 MIN", &lv_font_montserrat_12, C(0x929292));
+  lv_obj_set_pos(paceMeta[provider], 0, 29);
+  int chartWidth = 142, gap = 4, columnWidth = (chartWidth - gap * 5) / 6, chartX = width - chartWidth;
+  for (uint8_t i = 0; i < 6; ++i) {
+    paceColumns[provider][i] = lv_obj_create(row);
+    lv_obj_set_size(paceColumns[provider][i], columnWidth, 2); lv_obj_set_pos(paceColumns[provider][i], chartX + i * (columnWidth + gap), 37);
+    lv_obj_set_style_bg_color(paceColumns[provider][i], C(provider == 0 ? 0x35D078 : 0x8295A8), 0);
+    lv_obj_set_style_bg_opa(paceColumns[provider][i], LV_OPA_20, 0); lv_obj_set_style_border_width(paceColumns[provider][i], 0, 0);
+    lv_obj_set_style_radius(paceColumns[provider][i], 1, 0); lv_obj_set_style_pad_all(paceColumns[provider][i], 0, 0);
+    lv_obj_clear_flag(paceColumns[provider][i], LV_OBJ_FLAG_SCROLLABLE);
+  }
+}
+
+static lv_obj_t *makeProviderPanel(const char *title, uint8_t provider, int y, int height, bool flat, int &innerX, int &innerWidth) {
+  int panelX = flat ? 8 : 12, panelWidth = flat ? 464 : 456;
+  innerX = flat ? 8 : 14; innerWidth = panelWidth - innerX * 2;
+  lv_obj_t *panel = lv_obj_create(lv_scr_act()); lv_obj_set_size(panel, panelWidth, height); lv_obj_set_pos(panel, panelX, y);
+  lv_obj_set_style_pad_all(panel, 0, 0); lv_obj_clear_flag(panel, LV_OBJ_FLAG_SCROLLABLE); lv_obj_clear_flag(panel, LV_OBJ_FLAG_CLICKABLE);
+  if (flat) { lv_obj_set_style_bg_opa(panel, LV_OPA_TRANSP, 0); lv_obj_set_style_border_width(panel, 0, 0); }
+  else panelStyle(panel);
+  lv_obj_t *heading = label(panel, title, &lv_font_montserrat_20, C(0xFFFFFF)); lv_obj_set_pos(heading, innerX, 4);
+  providerStatusLabels[provider] = label(panel, "WAITING", &lv_font_montserrat_12, C(0x888888)); lv_obj_align(providerStatusLabels[provider], LV_ALIGN_TOP_RIGHT, -innerX, 8);
+  lv_obj_t *divider = lv_obj_create(panel); lv_obj_set_size(divider, innerWidth, 1); lv_obj_set_pos(divider, innerX, 30);
+  lv_obj_set_style_bg_color(divider, C(0x3A3A3A), 0); lv_obj_set_style_bg_opa(divider, LV_OPA_COVER, 0); lv_obj_set_style_border_width(divider, 0, 0); lv_obj_set_style_pad_all(divider, 0, 0);
+  lv_obj_clear_flag(divider, LV_OBJ_FLAG_SCROLLABLE);
+  return panel;
+}
+
+void displayBegin(const AppConfig &config) {
+  pinMode(38, OUTPUT); digitalWrite(38, HIGH); gfx->begin(10000000); gfx->fillScreen(BLACK);
+  touch.begin(); touch.setRotation(ROTATION_NORMAL);
+  Serial.println("[touch] GT911 ready; using library rotation without second axis mirror");
+  lv_init(); drawMemory = (lv_color_t *)heap_caps_malloc(480 * 32 * sizeof(lv_color_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  lv_disp_draw_buf_init(&drawBuf, drawMemory, nullptr, 480 * 32);
+  static lv_disp_drv_t displayDriver; lv_disp_drv_init(&displayDriver); displayDriver.hor_res = 480; displayDriver.ver_res = 480;
+  displayDriver.flush_cb = flush; displayDriver.draw_buf = &drawBuf; lv_disp_drv_register(&displayDriver);
+  static lv_indev_drv_t inputDriver; lv_indev_drv_init(&inputDriver); inputDriver.type = LV_INDEV_TYPE_POINTER;
+  inputDriver.read_cb = readTouch; lv_indev_drv_register(&inputDriver);
+
+  lv_obj_set_style_bg_color(lv_scr_act(), C(0x000000), 0); lv_obj_set_style_bg_opa(lv_scr_act(), LV_OPA_COVER, 0);
+  lv_obj_add_flag(lv_scr_act(), LV_OBJ_FLAG_CLICKABLE); lv_obj_add_event_cb(lv_scr_act(), toggleView, LV_EVENT_SHORT_CLICKED, nullptr);
+  lv_obj_t *title = label(lv_scr_act(), "AI USAGE", &lv_font_montserrat_20, C(0xFFFFFF)); lv_obj_set_pos(title, 16, 11);
+  modeLabel = label(lv_scr_act(), "USED", &lv_font_montserrat_12, C(0xFFFFFF)); lv_obj_align(modeLabel, LV_ALIGN_TOP_MID, 0, 17);
+  networkLabel = label(lv_scr_act(), "STARTING", &lv_font_montserrat_12, C(0xF2A93B)); lv_obj_align(networkLabel, LV_ALIGN_TOP_RIGHT, -16, 17);
+
+  bool flat = config.displayStyle == 1;
+  bool visible[5] = {config.showCursorModels, config.showCursorOther, config.showCursorOnDemand, config.showCodexFiveHour, config.showCodexWeekly};
+  uint8_t cursorCount = visible[0] + visible[1] + visible[2];
+  uint8_t codexCount = visible[3] + visible[4];
+  bool cursorPaceVisible = config.showCursorThirtyMinute;
+  bool codexPaceVisible = config.showCodexThirtyMinute;
+  int cursorHeight = 34 + cursorCount * 46 + (cursorPaceVisible ? 48 : 0) + 4;
+  int codexHeight = 34 + codexCount * 46 + (codexPaceVisible ? 48 : 0) + 4;
+  int y = 42, innerX, innerWidth;
+
+  if (cursorCount || cursorPaceVisible) {
+    lv_obj_t *cursorPanel = makeProviderPanel("CURSOR", 0, y, cursorHeight, flat, innerX, innerWidth);
+    int rowY = 34;
+    for (uint8_t i = 0; i < 3; ++i) if (visible[i]) { makeUsageRow(cursorPanel, i, innerX, rowY, innerWidth); rowY += 46; }
+    if (cursorPaceVisible) makePaceRow(cursorPanel, 0, innerX, rowY, innerWidth);
+    y += cursorHeight + 4;
+  }
+  if (codexCount || codexPaceVisible) {
+    lv_obj_t *codexPanel = makeProviderPanel("CODEX", 1, y, codexHeight, flat, innerX, innerWidth);
+    int rowY = 34;
+    for (uint8_t i = 3; i < 5; ++i) if (visible[i]) { makeUsageRow(codexPanel, i, innerX, rowY, innerWidth); rowY += 46; }
+    if (codexPaceVisible) makePaceRow(codexPanel, 1, innerX, rowY, innerWidth);
+  }
+  renderAll();
+}
+
+void displayLoop() { lv_timer_handler(); }
+void displaySetBrightness(uint8_t value) { digitalWrite(38, value ? HIGH : LOW); }
+
+void displaySetNetwork(const String &text, bool connected) {
+  networkAddress = connected ? text : "";
+  if (!networkLabel) return;
+  lv_label_set_text(networkLabel, text.c_str());
+  lv_obj_set_style_text_color(networkLabel, C(connected ? 0x45D597 : 0xF2A93B), 0);
+}
+
+void displayUpdate(const UsageSnapshot &codex, const UsageSnapshot &cursor, uint8_t warningPercent, uint8_t criticalPercent) {
+  latestCodex = codex; latestCursor = cursor; warningLevel = warningPercent; criticalLevel = criticalPercent;
+  rowData[0] = cursor.primary; rowData[1] = cursor.secondary; rowData[2] = cursor.tertiary;
+  rowData[3] = codex.primary; rowData[4] = codex.secondary;
+  for (uint8_t i = 0; i < 3; ++i) rowStatus[i] = cursor.status;
+  for (uint8_t i = 3; i < 5; ++i) rowStatus[i] = codex.status;
+  if (providerStatusLabels[0]) {
+    lv_label_set_text(providerStatusLabels[0], cursor.ok ? "ONLINE" : cursor.status == "disabled" ? "DISABLED" : "NO DATA");
+    lv_obj_set_style_text_color(providerStatusLabels[0], C(cursor.ok ? 0x45D597 : 0x888888), 0);
+  }
+  if (providerStatusLabels[1]) {
+    lv_label_set_text(providerStatusLabels[1], codex.ok ? "ONLINE" : codex.status == "disabled" ? "DISABLED" : "NO DATA");
+    lv_obj_set_style_text_color(providerStatusLabels[1], C(codex.ok ? 0x45D597 : 0x888888), 0);
+  }
+  renderAll();
+  Serial.printf("[display] view=%s, Cursor %.1f / %.1f / %.1f, Codex %.1f / %.1f\n",
+                availableView ? "available" : "used", cursor.primary.usedPercent, cursor.secondary.usedPercent,
+                cursor.tertiary.usedPercent, codex.primary.usedPercent, codex.secondary.usedPercent);
 }
