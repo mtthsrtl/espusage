@@ -265,7 +265,7 @@ static UsageLevel usageLevel(const UsageWindow &window) {
 static lv_color_t usageColor(UsageLevel level) {
   if (level == UsageLevel::Critical) return C(0xFF5050);
   if (level == UsageLevel::Warning) return C(0xF0A020);
-  if (level == UsageLevel::Overpace) return C(0xE7C547);
+  if (level == UsageLevel::Overpace) return C(0xDDF542);
   if (level == UsageLevel::Ok) return C(0x35D078);
   return C(0x7D7D7D);
 }
