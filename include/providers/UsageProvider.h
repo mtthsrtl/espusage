@@ -6,6 +6,10 @@ struct UsageWindow {
   String label;
   float usedPercent = -1;
   float elapsedPercent = -1;
+  bool monetary = false;
+  float usedAmount = -1;
+  float limitAmount = -1;
+  String currencySymbol;
   String resetText;
 };
 
