@@ -3,6 +3,7 @@
 #include <ESPmDNS.h>
 #include <esp_sleep.h>
 #include <esp_system.h>
+#include <time.h>
 #include "AppConfig.h"
 #include "Display.h"
 #include "WebPortal.h"
@@ -11,6 +12,9 @@
 static AppConfig config; static CodexProvider codex; static CursorProvider cursor; static UsageSnapshot cs,us; static uint32_t lastFetch=0;
 static volatile uint8_t lastDisconnectReason=0;
 static String startupNetworkText="STARTING"; static bool startupNetworkConnected=false;
+static constexpr const char *DISPLAY_TIMEZONE = "CET-1CEST,M3.5.0/2,M10.5.0/3";
+static bool displayScheduledOff = false, displayClockWarningLogged = false;
+static uint32_t displayWakeUntilMs = 0;
 
 struct CodexPaceBucket { uint32_t slot = 0; float delta = 0; bool valid = false; };
 static CodexPaceBucket codexPace[6];
@@ -36,6 +40,55 @@ static void ensureCleanPeripheralBoot() {
 
 static void clearCodexPace() {
   for (CodexPaceBucket &bucket : codexPace) bucket = CodexPaceBucket();
+}
+
+static bool isDisplayOffWindow(uint16_t minuteOfDay) {
+  uint16_t from = config.displayOffFromMinutes, until = config.displayOffUntilMinutes;
+  if (!config.displayOffEnabled || from == until) return false;
+  return from < until ? minuteOfDay >= from && minuteOfDay < until
+                      : minuteOfDay >= from || minuteOfDay < until;
+}
+
+static void updateDisplayPower() {
+  bool touched = displayConsumeTouchActivity();
+  if (!config.displayOffEnabled || config.displayOffFromMinutes == config.displayOffUntilMinutes) {
+    displayWakeUntilMs = 0;
+    if (displayScheduledOff) {
+      displayScheduledOff = false;
+      displaySetBrightness(config.brightness);
+      Serial.println("[display][schedule] Schedule inactive; backlight on");
+    }
+    return;
+  }
+
+  time_t epoch = time(nullptr);
+  if (epoch < 1700000000) {
+    if (!displayClockWarningLogged) {
+      displayClockWarningLogged = true;
+      Serial.println("[display][schedule] Waiting for NTP time; backlight remains on");
+    }
+    return;
+  }
+  displayClockWarningLogged = false;
+  setenv("TZ", DISPLAY_TIMEZONE, 1);
+  tzset();
+  struct tm localTime {};
+  localtime_r(&epoch, &localTime);
+  bool inOffWindow = isDisplayOffWindow(localTime.tm_hour * 60 + localTime.tm_min);
+  uint32_t nowMs = millis();
+  if (touched && inOffWindow) {
+    displayWakeUntilMs = nowMs + 60000UL;
+    Serial.println("[display][schedule] Touch wake: backlight on for 60 seconds");
+  }
+  bool wakeActive = displayWakeUntilMs != 0 && (int32_t)(displayWakeUntilMs - nowMs) > 0;
+  if (!wakeActive) displayWakeUntilMs = 0;
+  bool shouldBeOff = inOffWindow && !wakeActive;
+  if (shouldBeOff != displayScheduledOff) {
+    displayScheduledOff = shouldBeOff;
+    displaySetBrightness(shouldBeOff ? 0 : config.brightness);
+    Serial.printf("[display][schedule] %s at %02d:%02d (Europe/Berlin)\n",
+                  shouldBeOff ? "Backlight off" : "Backlight on", localTime.tm_hour, localTime.tm_min);
+  }
 }
 
 static void updateCodexPace(UsageSnapshot &snapshot) {
@@ -111,7 +164,7 @@ static bool connectWifi(){
   if(WiFi.status()==WL_CONNECTED){
     String ip=WiFi.localIP().toString();Serial.printf("[wifi][station] Connected. DHCP IP: %s, RSSI: %d dBm, channel: %d\n",ip.c_str(),WiFi.RSSI(),WiFi.channel());
     bool mdns=MDNS.begin(config.hostname);Serial.printf("[wifi] mDNS: http://%s.local/ (%s)\n",config.hostname.c_str(),mdns?"ready":"failed");
-    configTime(0,0,"pool.ntp.org","time.cloudflare.com");startupNetworkText=ip;startupNetworkConnected=true;return true;
+    configTime(0,0,"pool.ntp.org","time.cloudflare.com");setenv("TZ",DISPLAY_TIMEZONE,1);tzset();startupNetworkText=ip;startupNetworkConnected=true;return true;
   }else{
     Serial.printf("[wifi][station] All attempts failed, status=%d, last reason=%u\n",(int)WiFi.status(),lastDisconnectReason);
     if(lastDisconnectReason==15)Serial.println("[wifi][station] reason=15: WPA 4-way handshake timeout; check password/security mode");
@@ -119,9 +172,9 @@ static bool connectWifi(){
     Serial.println("[wifi][setup] Falling back to recovery portal");startRecoveryAp("ESPUsage-Setup");return false;
   }
 }
-void setup(){Serial.begin(115200);delay(300);Serial.println("\n[boot] ESP Usage starting");ensureCleanPeripheralBoot();loadConfig(config);Serial.printf("[config][nvs] Cursor: enabled=%s, token=%s\n",config.cursor.enabled?"yes":"no",config.cursor.token.length()?"stored":"missing");Serial.printf("[config][nvs] Codex: enabled=%s, access_token=%s, account_id=%s, mode=%s\n",config.codex.enabled?"yes":"no",config.codex.token.length()?"stored":"missing",config.codex.accountId.length()?"stored":"missing",config.codex.endpoint.length()?"adapter":"direct");bool connected=connectWifi();displayBegin(config);displaySetBrightness(config.brightness);displaySetNetwork(startupNetworkText,startupNetworkConnected);webBegin(config,!connected);Serial.println("[boot] Web portal ready");}
+void setup(){Serial.begin(115200);delay(300);Serial.println("\n[boot] ESP Usage starting");ensureCleanPeripheralBoot();loadConfig(config);Serial.printf("[config][nvs] Cursor: enabled=%s, token=%s\n",config.cursor.enabled?"yes":"no",config.cursor.token.length()?"stored":"missing");Serial.printf("[config][nvs] Codex: enabled=%s, access_token=%s, account_id=%s, mode=%s\n",config.codex.enabled?"yes":"no",config.codex.token.length()?"stored":"missing",config.codex.accountId.length()?"stored":"missing",config.codex.endpoint.length()?"adapter":"direct");Serial.printf("[config][nvs] Display off time: %s, %02u:%02u-%02u:%02u Europe/Berlin\n",config.displayOffEnabled?"enabled":"disabled",config.displayOffFromMinutes/60,config.displayOffFromMinutes%60,config.displayOffUntilMinutes/60,config.displayOffUntilMinutes%60);bool connected=connectWifi();displayBegin(config);displaySetBrightness(config.brightness);displaySetNetwork(startupNetworkText,startupNetworkConnected);webBegin(config,!connected);Serial.println("[boot] Web portal ready");}
 void loop(){
-  displayLoop(); webLoop();
+  displayLoop(); webLoop(); updateDisplayPower();
   if(WiFi.status()==WL_CONNECTED&&(lastFetch==0||millis()-lastFetch>(uint32_t)config.refreshMinutes*60000UL)){
     lastFetch=millis(); Serial.println("[usage] Refreshing Codex and Cursor");
     UsageSnapshot freshCodex=codex.fetch(config.codex,config.verifyTls);

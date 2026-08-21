@@ -23,6 +23,9 @@ struct AppConfig {
   bool verifyTls = true;
   uint8_t displayStyle = 0;  // 0 = framed panels, 1 = open/frameless
   bool displayAvailable = false;
+  bool displayOffEnabled = false;
+  uint16_t displayOffFromMinutes = 22 * 60;
+  uint16_t displayOffUntilMinutes = 7 * 60;
   bool showCursorModels = true;
   bool showCursorOther = true;
   bool showCursorOnDemand = true;
