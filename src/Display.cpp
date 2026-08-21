@@ -11,6 +11,7 @@ static TAMC_GT911 touch(19,45,41,42,480,480);
 static lv_disp_draw_buf_t drawBuf; static lv_color_t *drawMemory;
 static lv_obj_t *networkLabel,*cards[2],*providerLabels[2],*windowLabels[2],*values[2],*statusLabels[2],*bars[2],*resetLabels[2];
 static UsageSnapshot snapshots[2];
+static String networkAddress;
 
 static lv_color_t C(uint32_t value){return lv_color_hex(value);}
 static lv_obj_t *makeLabel(lv_obj_t *parent,const char *text,const lv_font_t *font,lv_color_t color){lv_obj_t *o=lv_label_create(parent);lv_label_set_text(o,text);lv_obj_set_style_text_font(o,font,0);lv_obj_set_style_text_color(o,color,0);return o;}
@@ -49,7 +50,7 @@ void displayBegin(){
 }
 void displayLoop(){lv_timer_handler();}
 void displaySetBrightness(uint8_t value){digitalWrite(38,value?HIGH:LOW);}
-void displaySetNetwork(const String &text,bool connected){if(!networkLabel)return;lv_label_set_text(networkLabel,text.c_str());lv_obj_set_style_text_color(networkLabel,C(connected?0x45D597:0xF2A93B),0);}
+void displaySetNetwork(const String &text,bool connected){networkAddress=connected?text:"";if(!networkLabel)return;lv_label_set_text(networkLabel,text.c_str());lv_obj_set_style_text_color(networkLabel,C(connected?0x45D597:0xF2A93B),0);}
 void displayUpdate(const UsageSnapshot &codex,const UsageSnapshot &cursor,uint8_t warning,uint8_t critical){
   snapshots[0]=codex;snapshots[1]=cursor;UsageSnapshot data[2]={codex,cursor};
   for(int i=0;i<2;i++){float p=data[i].primary.usedPercent;lv_color_t color;String state;
@@ -59,7 +60,13 @@ void displayUpdate(const UsageSnapshot &codex,const UsageSnapshot &cursor,uint8_
     else{color=C(0x3DDC84);state="OK";}
     lv_label_set_text(statusLabels[i],state.c_str());lv_obj_set_style_text_color(statusLabels[i],color,0);lv_obj_set_style_bg_color(bars[i],color,LV_PART_INDICATOR);
     lv_label_set_text(values[i],p<0?"--%":(String(p,0)+"%").c_str());lv_obj_set_style_text_color(values[i],color,0);lv_bar_set_value(bars[i],p<0?0:(int)constrain(p,0,100),LV_ANIM_ON);
-    lv_label_set_text(windowLabels[i],data[i].primary.label.c_str());String reset=data[i].primary.resetText.length()?data[i].primary.resetText:data[i].status;lv_label_set_text(resetLabels[i],reset.c_str());
+    lv_label_set_text(windowLabels[i],data[i].primary.label.c_str());
+    String reset;
+    if((data[i].status=="disabled"||data[i].status.indexOf("token missing")>=0)&&networkAddress.length()){
+      state="SETUP";lv_label_set_text(statusLabels[i],state.c_str());
+      reset="Open http://"+networkAddress;
+    }else reset=data[i].primary.resetText.length()?data[i].primary.resetText:data[i].status;
+    lv_label_set_text(resetLabels[i],reset.c_str());
   }
 }
 
