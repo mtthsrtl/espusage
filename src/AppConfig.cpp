@@ -13,6 +13,7 @@ bool loadConfig(AppConfig &c) {
   c.codex.endpoint = prefs.getString("codex_url", "");
   c.codex.token = prefs.getString("codex_tok", "");
   c.codex.session = prefs.getString("codex_sess", "");
+  c.codex.accountId = prefs.getString("codex_acct", "");
   c.cursor.enabled = prefs.getBool("cursor_on", false);
   c.cursor.endpoint = prefs.getString("cursor_url", "https://cursor.com/api/usage-summary");
   c.cursor.token = prefs.getString("cursor_tok", "");
@@ -33,6 +34,7 @@ bool saveConfig(const AppConfig &c) {
   prefs.putString("host", c.hostname);
   prefs.putBool("codex_on", c.codex.enabled); prefs.putString("codex_url", c.codex.endpoint);
   prefs.putString("codex_tok", c.codex.token); prefs.putString("codex_sess", c.codex.session);
+  prefs.putString("codex_acct", c.codex.accountId);
   prefs.putBool("cursor_on", c.cursor.enabled); prefs.putString("cursor_url", c.cursor.endpoint);
   prefs.putString("cursor_tok", c.cursor.token); prefs.putString("cursor_sess", c.cursor.session);
   prefs.putUChar("bright", c.brightness); prefs.putUShort("refresh", c.refreshMinutes);

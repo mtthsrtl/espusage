@@ -15,6 +15,7 @@ static bool request(const String &method, const String &url, const ProviderConfi
   if (url.indexOf("api2.cursor.sh/aiserver.v1.DashboardService/") >= 0)
     http.addHeader("Connect-Protocol-Version", "1");
   if (cfg.token.length()) http.addHeader("Authorization", "Bearer " + cfg.token);
+  if (cfg.accountId.length()) http.addHeader("ChatGPT-Account-Id", cfg.accountId);
   if (cfg.session.length()) http.addHeader("Cookie", cfg.session);
   int code;
   if (method == "POST") { http.addHeader("Content-Type", "application/json"); code = http.POST(body); }

@@ -4,7 +4,7 @@ Native, standalone firmware for the 4-inch GUITION ESP32-S3 4848S040 (480×480).
 
 ## What is included
 
-- Modern 480×480 LVGL dashboard with Codex and Cursor cards, progress bars, status colors, and tap-to-open detail overlays
+- Modern 480×480 LVGL dashboard with one grouped Cursor panel on top and one grouped Codex panel below, progress bars, status colors, and tap-to-open detail overlays
 - ST7701S RGB panel, GT911 touch, 150 Hz PWM backlight, octal PSRAM, and 16 MB flash configuration
 - Wi-Fi station mode plus automatic setup/recovery AP (`ESPUsage-Setup`)
 - Browser-based Wi-Fi scan, network selection, password entry, and NVS-backed reset/reconfiguration
@@ -79,9 +79,11 @@ If OTA is interrupted, the ESP32 bootloader retains the previously valid OTA slo
 
 ### Codex
 
-OpenAI documents where users can view Codex limits and credits (Codex Settings → Usage), but does not document a consumer REST endpoint for retrieving the five-hour/weekly ChatGPT Codex gauges. See [Using Codex with your ChatGPT plan](https://help.openai.com/en/articles/11369540) and the [Codex rate card](https://help.openai.com/en/articles/20001106).
+OpenAI documents where users can view Codex limits and credits (Codex Settings → Usage), but does not document a public consumer REST endpoint for retrieving the five-hour/weekly ChatGPT Codex gauges. See [Using Codex with your ChatGPT plan](https://help.openai.com/en/articles/11369540) and the [Codex rate card](https://help.openai.com/en/articles/20001106).
 
-For that reason this project deliberately does **not** embed a scraped ChatGPT endpoint, browser cookie, or undocumented session flow. Configure a trusted HTTPS adapter that returns:
+The web UI can use the Codex app OAuth credentials stored locally in `%USERPROFILE%\.codex\auth.json`. Copy `tokens.access_token` into **Codex access_token** and, when present, copy `tokens.account_id` into **ChatGPT account_id**. With the adapter URL left empty, the firmware sends these values to the same unofficial read-only usage route used by the local companion widget. Access tokens expire; this ESP32 firmware deliberately does not store a refresh token or perform an OAuth refresh. Replace the access token in the web UI when the display reports HTTP 401.
+
+This direct route is **undocumented and unsupported** and may stop working. As an alternative, configure a trusted HTTPS adapter URL that returns:
 
 ```json
 {
@@ -92,11 +94,11 @@ For that reason this project deliberately does **not** embed a scraped ChatGPT e
 }
 ```
 
-The adapter URL and optional bearer token are runtime-only NVS values. Any future direct ChatGPT endpoint must be treated as **undocumented/unsupported** until OpenAI publishes it.
+The adapter URL and optional bearer token are runtime-only NVS values.
 
 ### Cursor
 
-Cursor officially documents an [Admin API](https://cursor.com/docs/account/teams/admin-api) for team usage. It requires a Team/Enterprise admin API key. For an individual account, this firmware can instead use the session/auth token with `GET https://cursor.com/api/usage-summary`. That endpoint and cookie flow are **undocumented and unsupported by Cursor** and may change without notice. The token is stored only in ESP32 NVS.
+Cursor officially documents an [Admin API](https://cursor.com/docs/account/teams/admin-api) for team usage. It requires a Team/Enterprise admin API key. For an individual account, this firmware can instead use the session/auth token with `GET https://cursor.com/api/usage-summary`. On Windows, `E:\Cursor_Usage` reads it from `%APPDATA%\Cursor\User\globalStorage\state.vscdb`, table `ItemTable`, key `cursorAuth/accessToken`. The firmware accepts either that raw JWT or an existing `sub::JWT`/`WorkosCursorSessionToken` value. This endpoint and cookie flow are **undocumented and unsupported by Cursor** and may change without notice. The token is stored only in ESP32 NVS.
 
 The display maps the currently observed response fields as follows:
 
@@ -112,6 +114,7 @@ All three Cursor cards use `billingCycleEnd` for the remaining reset time. The i
 - The web portal is HTTP on the local LAN. Use a trusted home/office network; the setup AP is intended only for initial provisioning.
 - Provider traffic requires an `https://` URL. The current small-device client encrypts transport but does not yet pin/validate a CA certificate (`setInsecure()`); this limitation is explicit in `HttpJson.cpp`. Do not expose the device to an untrusted network.
 - Diagnostics expose booleans such as `codex_configured`, never credential values.
+- Codex and Cursor access tokens grant account access. Never share them, commit them, or paste them into serial logs.
 - For production hardening, enable ESP32 NVS encryption and Secure Boot/Flash Encryption during provisioning.
 
 ## Build

@@ -1,14 +1,30 @@
 #include "providers/CursorProvider.h"
 #include "providers/HttpJson.h"
 #include <ArduinoJson.h>
+#include <mbedtls/base64.h>
 #include <time.h>
 
 // UNDOCUMENTED CURSOR WEB API. Mirrors E:\Cursor_Usage's read-only flow.
 // Cursor does not guarantee this endpoint or schema; it may change without notice.
-static String cookieFor(String token) {
+static String normalizeSessionToken(String token) {
   token.trim();
   const String prefix = "WorkosCursorSessionToken=";
   if (token.startsWith(prefix)) token.remove(0, prefix.length());
+  token.replace("%3A%3A", "::"); token.replace("%3a%3a", "::");
+  if (token.indexOf("::") >= 0) return token;
+  int first=token.indexOf('.'),second=first<0?-1:token.indexOf('.',first+1);
+  if(first>0&&second>first){
+    String encoded=token.substring(first+1,second);encoded.replace('-','+');encoded.replace('_','/');while(encoded.length()%4)encoded+='=';
+    size_t outputLength=0;unsigned char decoded[768];
+    if(mbedtls_base64_decode(decoded,sizeof(decoded)-1,&outputLength,(const unsigned char*)encoded.c_str(),encoded.length())==0){
+      decoded[outputLength]=0;JsonDocument payload;if(deserializeJson(payload,decoded)==DeserializationError::Ok){String subject=String((const char*)(payload["sub"]|""));if(subject.length())return subject+"::"+token;}
+    }
+  }
+  return token;
+}
+static String cookieFor(String token) {
+  const String prefix = "WorkosCursorSessionToken=";
+  token=normalizeSessionToken(token);
   token.replace("::", "%3A%3A");
   return prefix + token;
 }

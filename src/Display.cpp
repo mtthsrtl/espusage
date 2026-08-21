@@ -9,9 +9,9 @@ static Arduino_ESP32RGBPanel *rgb=new Arduino_ESP32RGBPanel(18,17,16,21,11,12,13
 static Arduino_RGB_Display *gfx=new Arduino_RGB_Display(480,480,rgb,1,true,bus,GFX_NOT_DEFINED,st7701_type9_init_operations,sizeof(st7701_type9_init_operations));
 static TAMC_GT911 touch(19,45,41,42,480,480);
 static lv_disp_draw_buf_t drawBuf; static lv_color_t *drawMemory;
-static lv_obj_t *networkLabel,*statusLabels[4],*values[4],*bars[4],*resetLabels[4];
-static String rowNames[4]={"CODEX WEEKLY","CURSOR MODELS","AUTO MODELS","API USAGE"};
-static UsageWindow rowData[4]; static String rowStatus[4]; static String networkAddress;
+static lv_obj_t *networkLabel,*statusLabels[5],*values[5],*bars[5],*resetLabels[5];
+static String rowNames[5]={"CURSOR MODELS","AUTO MODELS","API USAGE","5-HOUR LIMIT","WEEKLY LIMIT"};
+static UsageWindow rowData[5]; static String rowStatus[5]; static String networkAddress;
 
 static lv_color_t C(uint32_t v){return lv_color_hex(v);}
 static lv_obj_t *label(lv_obj_t *p,const char *s,const lv_font_t *f,lv_color_t c){lv_obj_t *o=lv_label_create(p);lv_label_set_text(o,s);lv_obj_set_style_text_font(o,f,0);lv_obj_set_style_text_color(o,c,0);return o;}
@@ -27,13 +27,17 @@ static void details(lv_event_t *e){
   lv_obj_t *b=label(m,body.c_str(),&lv_font_montserrat_16,C(0xB8B8B8));lv_obj_set_width(b,380);lv_obj_align(b,LV_ALIGN_TOP_LEFT,0,55);
   lv_obj_t *x=lv_btn_create(m);lv_obj_set_size(x,110,44);lv_obj_align(x,LV_ALIGN_BOTTOM_RIGHT,0,0);lv_obj_set_style_bg_color(x,C(0x252525),0);lv_obj_t *xl=label(x,"CLOSE",&lv_font_montserrat_14,C(0xFFFFFF));lv_obj_center(xl);lv_obj_add_event_cb(x,closeModal,LV_EVENT_CLICKED,m);
 }
-static void makeCard(int i,int y){
-  lv_obj_t *c=lv_obj_create(lv_scr_act());lv_obj_set_size(c,440,88);lv_obj_set_pos(c,20,y);panel(c);lv_obj_set_style_pad_all(c,13,0);lv_obj_add_flag(c,LV_OBJ_FLAG_CLICKABLE);lv_obj_add_event_cb(c,details,LV_EVENT_CLICKED,(void*)(intptr_t)i);
-  lv_obj_t *n=label(c,rowNames[i].c_str(),&lv_font_montserrat_16,C(0xF2F2F2));lv_obj_align(n,LV_ALIGN_TOP_LEFT,0,-2);
-  statusLabels[i]=label(c,"WAITING",&lv_font_montserrat_12,C(0x888888));lv_obj_align(statusLabels[i],LV_ALIGN_TOP_RIGHT,-68,0);
-  values[i]=label(c,"--%",&lv_font_montserrat_20,C(0xF2F2F2));lv_obj_align(values[i],LV_ALIGN_TOP_RIGHT,0,-4);
-  bars[i]=lv_bar_create(c);lv_obj_set_size(bars[i],414,9);lv_obj_align(bars[i],LV_ALIGN_BOTTOM_MID,0,-18);lv_bar_set_range(bars[i],0,100);lv_obj_set_style_bg_color(bars[i],C(0x282828),LV_PART_MAIN);lv_obj_set_style_bg_opa(bars[i],LV_OPA_COVER,LV_PART_MAIN);lv_obj_set_style_radius(bars[i],5,LV_PART_MAIN);lv_obj_set_style_radius(bars[i],5,LV_PART_INDICATOR);
-  resetLabels[i]=label(c,"Waiting for usage data",&lv_font_montserrat_12,C(0x929292));lv_obj_align(resetLabels[i],LV_ALIGN_BOTTOM_LEFT,0,1);
+static void makeUsageRow(lv_obj_t *parent,int i,int y){
+  lv_obj_t *row=lv_obj_create(parent);lv_obj_set_size(row,410,50);lv_obj_set_pos(row,0,y);lv_obj_set_style_bg_opa(row,LV_OPA_TRANSP,0);lv_obj_set_style_border_width(row,0,0);lv_obj_set_style_pad_all(row,0,0);lv_obj_clear_flag(row,LV_OBJ_FLAG_SCROLLABLE);lv_obj_add_flag(row,LV_OBJ_FLAG_CLICKABLE);lv_obj_add_event_cb(row,details,LV_EVENT_CLICKED,(void*)(intptr_t)i);
+  lv_obj_t *n=label(row,rowNames[i].c_str(),&lv_font_montserrat_12,C(0xF2F2F2));lv_obj_set_pos(n,0,0);
+  statusLabels[i]=label(row,"WAITING",&lv_font_montserrat_12,C(0x888888));lv_obj_align(statusLabels[i],LV_ALIGN_TOP_RIGHT,-62,0);
+  values[i]=label(row,"--%",&lv_font_montserrat_16,C(0xF2F2F2));lv_obj_align(values[i],LV_ALIGN_TOP_RIGHT,0,0);
+  bars[i]=lv_bar_create(row);lv_obj_set_size(bars[i],410,7);lv_obj_set_pos(bars[i],0,20);lv_bar_set_range(bars[i],0,100);lv_obj_set_style_bg_color(bars[i],C(0x282828),LV_PART_MAIN);lv_obj_set_style_bg_opa(bars[i],LV_OPA_COVER,LV_PART_MAIN);lv_obj_set_style_radius(bars[i],4,LV_PART_MAIN);lv_obj_set_style_radius(bars[i],4,LV_PART_INDICATOR);
+  resetLabels[i]=label(row,"Waiting for usage data",&lv_font_montserrat_12,C(0x929292));lv_obj_set_pos(resetLabels[i],0,31);
+}
+static lv_obj_t *makeProviderPanel(const char *title,int y,int height){
+  lv_obj_t *p=lv_obj_create(lv_scr_act());lv_obj_set_size(p,440,height);lv_obj_set_pos(p,20,y);panel(p);lv_obj_set_style_pad_all(p,14,0);
+  lv_obj_t *heading=label(p,title,&lv_font_montserrat_20,C(0xFFFFFF));lv_obj_set_pos(heading,0,-3);return p;
 }
 void displayBegin(){
   pinMode(38,OUTPUT);digitalWrite(38,HIGH);gfx->begin(10000000);gfx->fillScreen(BLACK);touch.begin();touch.setRotation(ROTATION_NORMAL);
@@ -43,7 +47,8 @@ void displayBegin(){
   lv_obj_set_style_bg_color(lv_scr_act(),C(0x000000),0);lv_obj_set_style_bg_opa(lv_scr_act(),LV_OPA_COVER,0);
   lv_obj_t *title=label(lv_scr_act(),"AI USAGE",&lv_font_montserrat_20,C(0xFFFFFF));lv_obj_set_pos(title,20,15);
   networkLabel=label(lv_scr_act(),"STARTING",&lv_font_montserrat_12,C(0xF2A93B));lv_obj_align(networkLabel,LV_ALIGN_TOP_RIGHT,-20,20);
-  for(int i=0;i<4;i++)makeCard(i,50+i*101);
+  lv_obj_t *cursorPanel=makeProviderPanel("CURSOR",50,220);makeUsageRow(cursorPanel,0,30);makeUsageRow(cursorPanel,1,82);makeUsageRow(cursorPanel,2,134);
+  lv_obj_t *codexPanel=makeProviderPanel("CODEX",282,178);makeUsageRow(codexPanel,3,30);makeUsageRow(codexPanel,4,84);
 }
 void displayLoop(){lv_timer_handler();}
 void displaySetBrightness(uint8_t v){digitalWrite(38,v?HIGH:LOW);}
@@ -55,5 +60,5 @@ static void updateRow(int i,const UsageWindow &w,const String &providerStatus,ui
   String bottom=w.resetText.length()?w.resetText:providerStatus;if(p<0&&networkAddress.length()&&(providerStatus=="disabled"||providerStatus.indexOf("missing")>=0))bottom="Setup: http://"+networkAddress;lv_label_set_text(resetLabels[i],bottom.c_str());
 }
 void displayUpdate(const UsageSnapshot &codex,const UsageSnapshot &cursor,uint8_t warning,uint8_t critical){
-  updateRow(0,codex.primary,codex.status,warning,critical);updateRow(1,cursor.primary,cursor.status,warning,critical);updateRow(2,cursor.secondary,cursor.status,warning,critical);updateRow(3,cursor.tertiary,cursor.status,warning,critical);
+  updateRow(0,cursor.primary,cursor.status,warning,critical);updateRow(1,cursor.secondary,cursor.status,warning,critical);updateRow(2,cursor.tertiary,cursor.status,warning,critical);updateRow(3,codex.primary,codex.status,warning,critical);updateRow(4,codex.secondary,codex.status,warning,critical);
 }

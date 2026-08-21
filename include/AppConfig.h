@@ -6,6 +6,7 @@ struct ProviderConfig {
   String endpoint;
   String token;
   String session;
+  String accountId;
 };
 
 struct AppConfig {
