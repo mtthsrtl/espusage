@@ -18,6 +18,7 @@ struct TouchDiagnostics {
   int16_t displayX;
   int16_t displayY;
   uint32_t callbackCalls;
+  uint32_t fallbackReads;
   uint32_t probeAttempts;
   uint32_t polls;
   uint32_t stateReads;
