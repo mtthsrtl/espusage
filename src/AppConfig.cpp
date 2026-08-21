@@ -13,11 +13,13 @@ bool loadConfig(AppConfig &c) {
   c.codex.token = prefs.getString("codex_tok", "");
   c.codex.session = prefs.getString("codex_sess", "");
   c.cursor.enabled = prefs.getBool("cursor_on", false);
-  c.cursor.endpoint = prefs.getString("cursor_url", "https://api.cursor.com/teams/daily-usage-data");
+  c.cursor.endpoint = prefs.getString("cursor_url", "https://cursor.com/api/usage-summary");
   c.cursor.token = prefs.getString("cursor_tok", "");
   c.cursor.session = prefs.getString("cursor_sess", "");
   c.brightness = prefs.getUChar("bright", 85);
   c.refreshMinutes = prefs.getUShort("refresh", 5);
+  c.warningPercent = prefs.getUChar("warn_pct", 70);
+  c.criticalPercent = prefs.getUChar("crit_pct", 90);
   c.verifyTls = prefs.getBool("tls", true);
   prefs.end();
   return true;
@@ -32,6 +34,7 @@ bool saveConfig(const AppConfig &c) {
   prefs.putBool("cursor_on", c.cursor.enabled); prefs.putString("cursor_url", c.cursor.endpoint);
   prefs.putString("cursor_tok", c.cursor.token); prefs.putString("cursor_sess", c.cursor.session);
   prefs.putUChar("bright", c.brightness); prefs.putUShort("refresh", c.refreshMinutes);
+  prefs.putUChar("warn_pct", c.warningPercent); prefs.putUChar("crit_pct", c.criticalPercent);
   prefs.putBool("tls", c.verifyTls); prefs.end();
   return true;
 }
