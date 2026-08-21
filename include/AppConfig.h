@@ -11,6 +11,7 @@ struct ProviderConfig {
 struct AppConfig {
   String wifiSsid;
   String wifiPassword;
+  bool wifiProvisioned = false;
   String hostname = "espusage";
   ProviderConfig codex;
   ProviderConfig cursor;
