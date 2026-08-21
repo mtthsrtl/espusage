@@ -15,7 +15,10 @@ static String cookieFor(String token) {
 static time_t parseIsoUtc(const char *iso) {
   if (!iso || !*iso) return 0; struct tm t = {};
   if (sscanf(iso, "%d-%d-%dT%d:%d:%d", &t.tm_year, &t.tm_mon, &t.tm_mday, &t.tm_hour, &t.tm_min, &t.tm_sec) != 6) return 0;
-  t.tm_year -= 1900; t.tm_mon -= 1; return timegm(&t);
+  t.tm_year -= 1900; t.tm_mon -= 1;
+  // Arduino-ESP32 2.x does not expose timegm(). The device clock is configured
+  // as UTC, so mktime provides the required epoch value portably here.
+  setenv("TZ", "UTC0", 1); tzset(); return mktime(&t);
 }
 static String remainingText(const char *iso) {
   time_t end=parseIsoUtc(iso), now=time(nullptr); if(end<=now||now<1700000000)return "reset time unavailable";
