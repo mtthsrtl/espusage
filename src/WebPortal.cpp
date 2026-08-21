@@ -195,6 +195,7 @@ void webBegin(AppConfig &c, bool setupMode){
    d["remaining_view"]=t.remainingView;
    String s; serializeJson(d,s); server.sendHeader("Cache-Control","no-store"); server.send(200,"application/json",s);
  });
+
  server.on("/api/display",HTTP_GET,[]{
    String mode=server.arg("mode"); mode.toLowerCase();
    bool remaining;
@@ -256,4 +257,3 @@ void webUpdateUsage(const UsageSnapshot &codex, const UsageSnapshot &cursor) {
   latestCursor = cursor;
   hasUsageSnapshot = true;
 }
-
