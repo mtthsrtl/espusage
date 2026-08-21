@@ -39,6 +39,12 @@ static const char OTA_FAILURE_PAGE[] PROGMEM = R"HTML(
 <body><main><h1>Firmware update failed</h1><p>The firmware could not be installed. The current firmware remains active.</p><a href="/">Back to ESP Usage</a></main></body></html>
 )HTML";
 
+static const char CONFIG_SUCCESS_PAGE[] PROGMEM = R"HTML(
+<!doctype html><html><head><meta name=viewport content="width=device-width,initial-scale=1"><title>ESP Usage settings</title>
+<style>:root{color-scheme:dark}body{font:16px system-ui;background:#090c11;color:#edf2f7;max-width:620px;margin:40px auto;padding:20px}main{background:#131820;border:1px solid #2a323d;border-radius:16px;padding:24px}p{color:#aeb8c4;line-height:1.55}a{display:inline-block;margin-top:12px;padding:12px 18px;border-radius:9px;background:#10a37f;color:#fff;text-decoration:none;font-weight:700}</style></head>
+<body><main><h1>Settings saved</h1><p>ESP Usage is restarting. Wait a few seconds, then return to the web UI.</p><a href="/">Back to ESP Usage</a></main></body></html>
+)HTML";
+
 static const char PAGE[] PROGMEM=R"HTML(
 <!doctype html><html><head><meta name=viewport content="width=device-width,initial-scale=1"><title>ESP Usage</title>
 <style>
@@ -196,7 +202,8 @@ void webBegin(AppConfig &c, bool setupMode){
    Serial.printf("[config][nvs] Saving Codex: enabled=%s, access_token=%s, account_id=%s\n",cfg->codex.enabled?"yes":"no",cfg->codex.token.length()?"stored":"missing",cfg->codex.accountId.length()?"stored":"missing");
    Serial.printf("[config][nvs] Display style=%s, mode=%s, rows: Cursor=%u/%u/%u/%u, Codex=%u/%u\n",cfg->displayStyle==1?"open":"panels",cfg->displayAvailable?"remaining":"used",cfg->showCursorModels,cfg->showCursorOther,cfg->showCursorOnDemand,cfg->showCursorThirtyMinute,cfg->showCodexWeekly,cfg->showCodexThirtyMinute);
    Serial.printf("[config][nvs] Display off time: %s, %02u:%02u-%02u:%02u Europe/Berlin\n",cfg->displayOffEnabled?"enabled":"disabled",cfg->displayOffFromMinutes/60,cfg->displayOffFromMinutes%60,cfg->displayOffUntilMinutes/60,cfg->displayOffUntilMinutes%60);
-   if(!saveConfig(*cfg)){server.send(500,"text/plain","Could not save settings.");return;} restartAfterResponse("Settings saved. Restarting...");
+   if(!saveConfig(*cfg)){server.send(500,"text/plain","Could not save settings.");return;}
+   server.send_P(200,"text/html",CONFIG_SUCCESS_PAGE); delay(750); ESP.restart();
  });
  server.on("/api/ota",HTTP_POST,[]{
    bool ok=!Update.hasError();
