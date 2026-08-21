@@ -48,6 +48,7 @@ static String rowStatus[4], networkAddress;
 static UsageSnapshot latestCodex, latestCursor;
 static bool availableView = false;
 static uint8_t warningLevel = 70, criticalLevel = 90;
+static uint32_t overpaceColor = 0xDDF542, warningColor = 0xF0A020;
 
 static lv_color_t C(uint32_t value) { return lv_color_hex(value); }
 
@@ -264,8 +265,8 @@ static UsageLevel usageLevel(const UsageWindow &window) {
 
 static lv_color_t usageColor(UsageLevel level) {
   if (level == UsageLevel::Critical) return C(0xFF5050);
-  if (level == UsageLevel::Warning) return C(0xF0A020);
-  if (level == UsageLevel::Overpace) return C(0xDDF542);
+  if (level == UsageLevel::Warning) return C(warningColor);
+  if (level == UsageLevel::Overpace) return C(overpaceColor);
   if (level == UsageLevel::Ok) return C(0x35D078);
   return C(0x7D7D7D);
 }
@@ -522,6 +523,8 @@ static lv_obj_t *makeProviderPanel(const char *title, uint8_t provider, int y, i
 
 void displayBegin(const AppConfig &config) {
   availableView = config.displayAvailable;
+  overpaceColor = config.overpaceColor;
+  warningColor = config.warningColor;
   // Bring up the board's independent GT911 bus before the RGB peripheral.
   // This also gives a useful boot-time probe even if LVGL never sees a press.
   touchBegin();
