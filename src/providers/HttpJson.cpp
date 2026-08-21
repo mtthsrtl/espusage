@@ -12,6 +12,8 @@ static bool request(const String &method, const String &url, const ProviderConfi
   if (!url.startsWith("https://")) { error = "HTTPS required"; return false; }
   if (!http.begin(client, url)) { error = "connection setup failed"; return false; }
   http.setTimeout(15000); http.addHeader("Accept", "application/json");
+  if (url.indexOf("api2.cursor.sh/aiserver.v1.DashboardService/") >= 0)
+    http.addHeader("Connect-Protocol-Version", "1");
   if (cfg.token.length()) http.addHeader("Authorization", "Bearer " + cfg.token);
   if (cfg.session.length()) http.addHeader("Cookie", cfg.session);
   int code;
