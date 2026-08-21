@@ -21,7 +21,13 @@ Do **not** install this firmware through EspControl's existing web updater. EspC
 ### Windows USB-C flash (exact steps)
 
 1. Install [Visual Studio Code](https://code.visualstudio.com/) and its [PlatformIO IDE extension](https://platformio.org/install/ide?install=vscode).
-2. Download/clone this repository and open its folder in VS Code.
+2. Download/clone this repository and open its folder in VS Code. Create your private local configuration once:
+
+   ```powershell
+   Copy-Item platformio.ini.example platformio.ini
+   ```
+
+   `platformio.ini` is ignored by Git. COM ports and optional local Wi-Fi build values therefore remain only on your computer.
 3. Connect the 4848S040 to the computer using a **USB-C data cable**. Disconnect other serial ESP boards.
 4. Let Windows finish installing the USB serial driver. In Device Manager, note the new COM port (for example `COM7`).
 5. In `platformio.ini`, add this line below `upload_speed` if automatic port detection chooses incorrectly:
@@ -81,11 +87,19 @@ The adapter URL and optional bearer token are runtime-only NVS values. Any futur
 
 ### Cursor
 
-Cursor officially documents an [Admin API](https://cursor.com/docs/account/teams/admin-api) for team usage. It requires a Team/Enterprise admin API key created in Cursor's dashboard. Individual-plan usage has no documented public API; do not paste a Cursor browser session cookie into this firmware. The current provider posts to `https://api.cursor.com/teams/daily-usage-data` and is intentionally isolated in `src/providers/CursorProvider.cpp` so its response mapping can be adjusted as Cursor evolves the API.
+Cursor officially documents an [Admin API](https://cursor.com/docs/account/teams/admin-api) for team usage. It requires a Team/Enterprise admin API key. For an individual account, this firmware can instead use the session/auth token with `GET https://cursor.com/api/usage-summary`. That endpoint and cookie flow are **undocumented and unsupported by Cursor** and may change without notice. The token is stored only in ESP32 NVS.
+
+The display maps the currently observed response fields as follows:
+
+- Cursor Models: `individualUsage.plan.totalPercentUsed` (falls back to the larger available sub-limit)
+- Auto Models: `individualUsage.plan.autoPercentUsed`
+- API Usage: `individualUsage.plan.apiPercentUsed`
+
+All three Cursor cards use `billingCycleEnd` for the remaining reset time. The implementation is isolated in `src/providers/CursorProvider.cpp` so a future schema change does not affect the display, storage, or Codex provider.
 
 ## Security notes
 
-- `.gitignore` excludes common secret files and build output. There are no credentials or tokens in this repository.
+- `.gitignore` excludes the local `platformio.ini`, common secret files, and build output. `platformio.ini.example` contains placeholders only. There are no credentials or tokens in this repository.
 - The web portal is HTTP on the local LAN. Use a trusted home/office network; the setup AP is intended only for initial provisioning.
 - Provider traffic requires an `https://` URL. The current small-device client encrypts transport but does not yet pin/validate a CA certificate (`setInsecure()`); this limitation is explicit in `HttpJson.cpp`. Do not expose the device to an untrusted network.
 - Diagnostics expose booleans such as `codex_configured`, never credential values.
