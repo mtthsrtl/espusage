@@ -13,6 +13,10 @@ static String startupNetworkText="STARTING"; static bool startupNetworkConnected
 #define ESPUSAGE_STRINGIFY(value) ESPUSAGE_STRINGIFY_INNER(value)
 #ifdef ESPUSAGE_WIFI_SSID
 static void applyBuildWifi() {
+  if (config.wifiProvisioned) {
+    Serial.println("[wifi] Using WiFi credentials saved in the web portal");
+    return;
+  }
   config.wifiSsid = ESPUSAGE_STRINGIFY(ESPUSAGE_WIFI_SSID);
   #ifdef ESPUSAGE_WIFI_PASSWORD
   config.wifiPassword = ESPUSAGE_STRINGIFY(ESPUSAGE_WIFI_PASSWORD);
@@ -41,7 +45,7 @@ static void connectWifi(){
     configTime(0,0,"pool.ntp.org","time.cloudflare.com");startupNetworkText=ip;startupNetworkConnected=true;
   }else{
     Serial.printf("[wifi] Connection failed, status=%d, last reason=%u; starting ESPUsage-Recovery\n",(int)WiFi.status(),lastDisconnectReason);
-    WiFi.mode(WIFI_AP_STA);bool ok=WiFi.softAP("ESPUsage-Recovery");
+    WiFi.disconnect(true,false);delay(100);WiFi.mode(WIFI_AP);bool ok=WiFi.softAP("ESPUsage-Recovery");
     Serial.printf("[wifi] Recovery AP: %s, IP: %s\n",ok?"started":"FAILED",WiFi.softAPIP().toString().c_str());startupNetworkText="RECOVERY 192.168.4.1";startupNetworkConnected=false;
   }
 }
