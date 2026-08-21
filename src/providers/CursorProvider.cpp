@@ -62,6 +62,20 @@ static float onDemandPercent(JsonVariant bucket) {
   return enabled?-1.0f:0.0f;
 }
 
+static void addOnDemandAmounts(JsonVariant bucket, UsageWindow &window) {
+  if (bucket.isNull()) return;
+  float limit = bucket["limit"] | -1.0f;
+  float used = bucket["used"] | -1.0f;
+  float remaining = bucket["remaining"] | -1.0f;
+  if (used < 0 && limit >= 0 && remaining >= 0) used = limit - remaining;
+  if (used < 0) return;
+  // Cursor's personal usage-summary reports on-demand money in US cents.
+  window.monetary = true;
+  window.usedAmount = max(0.0f, used) / 100.0f;
+  window.limitAmount = limit > 0 ? limit / 100.0f : -1.0f;
+  window.currencySymbol = "$";
+}
+
 static uint64_t unsignedValue(JsonVariantConst value) {
   if (value.is<const char *>()) return strtoull(value.as<const char *>(), nullptr, 10);
   if (value.is<uint64_t>()) return value.as<uint64_t>();
@@ -202,8 +216,13 @@ UsageSnapshot CursorProvider::fetch(const ProviderConfig &cfg, bool tls) {
   if(!getJson(url,request,tls,d,error)){out.status=error;return out;}
   float autoUsed=d["individualUsage"]["plan"]["autoPercentUsed"]|-1.0f;
   float apiUsed=d["individualUsage"]["plan"]["apiPercentUsed"]|-1.0f;
-  float demandUsed=onDemandPercent(d["individualUsage"]["onDemand"]);
-  if(demandUsed<0)demandUsed=onDemandPercent(d["teamUsage"]["onDemand"]);
+  JsonVariant individualDemand=d["individualUsage"]["onDemand"];
+  float demandUsed=onDemandPercent(individualDemand);
+  if(demandUsed<0){
+    JsonVariant teamDemand=d["teamUsage"]["onDemand"];
+    demandUsed=onDemandPercent(teamDemand);
+    addOnDemandAmounts(teamDemand,out.tertiary);
+  } else addOnDemandAmounts(individualDemand,out.tertiary);
   if(demandUsed<0)demandUsed=0.0f;
   String reset=remainingText(d["billingCycleEnd"]|"");
   float elapsed=elapsedPercent(d["billingCycleStart"]|"",d["billingCycleEnd"]|"");

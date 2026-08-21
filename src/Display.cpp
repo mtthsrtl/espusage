@@ -298,6 +298,13 @@ static String standardDetails(uint8_t index) {
   if (window.usedPercent < 0) body = "No usage data";
   else {
     body = "Used: " + String(window.usedPercent, 1) + "%\nRemaining: " + String(100.0f - window.usedPercent, 1) + "%";
+    if (window.monetary) {
+      body += "\nSpend used: " + window.currencySymbol + String(window.usedAmount, 2);
+      if (window.limitAmount >= 0) {
+        body += "\nSpend remaining: " + window.currencySymbol + String(max(0.0f, window.limitAmount - window.usedAmount), 2);
+        body += "\nSpend limit: " + window.currencySymbol + String(window.limitAmount, 2);
+      }
+    }
     if (window.elapsedPercent >= 0) {
       body += "\nPeriod elapsed: " + String(window.elapsedPercent, 1) + "%";
       body += "\nPeriod remaining: " + String(100.0f - window.elapsedPercent, 1) + "%";
@@ -369,7 +376,12 @@ static void renderMetric(uint8_t index) {
   float shown = used < 0 ? -1 : availableView ? 100.0f - used : used;
   UsageLevel level = usageLevel(window);
   lv_color_t color = usageColor(level);
-  String valueText = shown < 0 ? "--%" : String(shown, 0) + "%";
+  String valueText;
+  if (window.monetary) {
+    float amount = availableView && window.limitAmount >= 0
+      ? max(0.0f, window.limitAmount - window.usedAmount) : window.usedAmount;
+    valueText = amount < 0 ? "--" : window.currencySymbol + String(amount, 2);
+  } else valueText = shown < 0 ? "--%" : String(shown, 0) + "%";
   lv_label_set_text(statusLabels[index], usageState(level)); lv_obj_set_style_text_color(statusLabels[index], color, 0);
   lv_label_set_text(values[index], valueText.c_str()); lv_obj_set_style_text_color(values[index], color, 0);
   lv_obj_set_style_base_dir(bars[index], availableView ? LV_BASE_DIR_RTL : LV_BASE_DIR_LTR, 0);
@@ -453,7 +465,7 @@ static void makeUsageRow(lv_obj_t *parent, uint8_t index, int x, int y, int widt
   lv_obj_set_style_pad_all(row, 0, 0); lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
   rows[index] = row; addTouchCallbacks(row, index);
   lv_obj_t *name = label(row, rowNames[index].c_str(), &lv_font_montserrat_14, C(0xF2F2F2)); lv_obj_set_pos(name, 0, 0);
-  statusLabels[index] = label(row, "WAITING", &lv_font_montserrat_12, C(0x888888)); lv_obj_align(statusLabels[index], LV_ALIGN_TOP_RIGHT, -62, 1);
+  statusLabels[index] = label(row, "WAITING", &lv_font_montserrat_12, C(0x888888)); lv_obj_align(statusLabels[index], LV_ALIGN_TOP_RIGHT, -78, 1);
   values[index] = label(row, "--%", &lv_font_montserrat_20, C(0xF2F2F2)); lv_obj_align(values[index], LV_ALIGN_TOP_RIGHT, 0, -3);
   bars[index] = lv_bar_create(row); lv_obj_set_size(bars[index], width, 7); lv_obj_set_pos(bars[index], 0, 19);
   lv_bar_set_range(bars[index], 0, 100); lv_obj_set_style_bg_color(bars[index], C(0x282828), LV_PART_MAIN);
