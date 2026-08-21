@@ -6,7 +6,7 @@ Native, standalone firmware for the 4-inch GUITION ESP32-S3 4848S040 (480×480).
 
 - Modern 480×480 LVGL dashboard with selectable framed or flat design, individually selectable rows, wide progress bars, reset-period pace markers, and status colors
 - Touch operation: short tap switches the whole dashboard between `USED` and `AVAILABLE`; long press opens details for the selected limit or 30-minute row
-- Six 5-minute activity buckets for Cursor tokens/calls and Codex weekly-limit changes
+- Six 5-minute activity buckets for Cursor tokens/calls
 - ST7701S RGB panel, GT911 touch, 150 Hz PWM backlight, octal PSRAM, and 16 MB flash configuration
 - Wi-Fi station mode plus automatic setup/recovery AP (`ESPUsage-Setup`)
 - Browser-based Wi-Fi scan, network selection, password entry, and NVS-backed reset/reconfiguration
@@ -17,7 +17,7 @@ Native, standalone firmware for the 4-inch GUITION ESP32-S3 4848S040 (480×480).
 
 The display pinout is based on the working [EspControl 4848S040 hardware definition](https://github.com/jtenniswood/espcontrol/blob/main/devices/guition-esp32-s3-4848s040/device/device.yaml): RGB data pins, GPIO 39/48/47 panel control, GPIO 18/17/16/21 timing, GPIO 19/45 GT911, and GPIO 38 backlight. The Arduino_GFX timings use the field-tested 10/8/50 horizontal and 10/8/20 vertical porch/pulse values.
 
-Touch follows the same board-specific setup as EspControl: GT911 is polled every 16 ms on SDA GPIO19/SCL GPIO45, with no reset or interrupt GPIO assigned. The firmware probes both supported I²C addresses (`0x5D` and `0x14`) and retries automatically after communication loss. GPIO41/42 are not touch pins on this board.
+Touch follows the same board-specific setup as EspControl: GT911 is polled every 16 ms on SDA GPIO19/SCL GPIO45 at the ESPHome default of 50 kHz, with no reset or interrupt GPIO assigned. Register selection and data reads use separate I²C transactions, and a touch frame is acknowledged only after all point bytes were read. The firmware probes both supported addresses (`0x5D` and `0x14`), logs a full I²C scan when neither responds, and retries automatically after communication loss. GPIO41/42 are not touch pins on this board.
 
 ## Important: first installation from EspControl
 
@@ -100,7 +100,7 @@ This direct route is **undocumented and unsupported** and may stop working. As a
 
 The adapter URL and optional bearer token are runtime-only NVS values.
 
-The Codex **Last 30 min** row is calculated locally from changes to the weekly percentage. It shows six 5-minute buckets and their total as percentage points (`+1.80 PP`). The history intentionally remains in RAM to avoid needless flash writes, so the first successful request establishes a `COLLECTING 1/2` baseline. The value is shown after the second successful measurement while the six historical buckets continue filling. A detected weekly-limit reset clears the collection automatically. The Codex 5-hour row defaults to disabled after a one-time display-settings migration and can be enabled again in the web UI.
+The Codex section intentionally shows only the weekly limit. The five-hour limit and a Codex **Last 30 min** row are not displayed, so the weekly widget uses the full Codex section. A one-time display-settings migration removes the obsolete Codex rows from NVS.
 
 The firmware deliberately does not use OpenAI's [organization Usage API](https://developers.openai.com/api/reference/resources/admin/subresources/organization/subresources/usage). That API requires an organization admin key and measures OpenAI API organization usage; it does not represent the consumer Codex/ChatGPT subscription gauges shown here.
 
@@ -116,9 +116,9 @@ The display maps the currently observed response fields as follows:
 - Other Models: `individualUsage.plan.apiPercentUsed`
 - On Demand: percentage calculated from `individualUsage.onDemand.used` and `.limit` (with `teamUsage.onDemand` as a fallback)
 
-All three Cursor limits use `billingCycleStart` and `billingCycleEnd` for the remaining reset time and white elapsed-period marker. Codex uses each rate-limit window's duration and reset time for the same marker; adapters can supply `elapsed_percent`. Under **Display and status**, choose **Panels** for framed provider sections or **Flat** for open sections with a neutral divider, wider bars, and larger typography. Each normal limit and both 30-minute rows can be enabled separately; the layout compacts automatically for every combination.
+All three Cursor limits use `billingCycleStart` and `billingCycleEnd` for the remaining reset time and white elapsed-period marker. Codex uses the weekly rate-limit window's duration and reset time for the same marker; adapters can supply `elapsed_percent`. Under **Display and status**, choose **Panels** for framed provider sections or **Flat** for open sections with a neutral divider, wider bars, and larger typography. Each Cursor limit, Cursor's 30-minute row, and the Codex weekly row can be enabled separately; the layout expands automatically to use the 480×480 display.
 
-In `USED` mode a normal bar fills from the left with the consumed percentage. In `AVAILABLE` mode the displayed value is `100 − used` and the bar fills from the right; for example, 10% available occupies the rightmost 10%. The white pace marker is read as the remaining time from the right in that mode. The activity mini-charts always show consumption and are never inverted. A short tap anywhere switches modes. A long press on a limit opens Used, Available, Reset, elapsed period, and provider status; a long press on a 30-minute row opens its token split or Codex sample details. `USED` is restored after restart and is not stored in NVS.
+In `USED` mode a normal bar fills from the left with the consumed percentage. In `AVAILABLE` mode the displayed value is `100 − used` and the bar fills from the right; for example, 10% available occupies the rightmost 10%. The white pace marker is read as the remaining time from the right in that mode. Cursor's activity mini-chart always shows consumption and is never inverted. A short tap anywhere switches modes. A long press on a limit opens Used, Available, Reset, elapsed period, and provider status; a long press on Cursor's 30-minute row opens its token split and call details. `USED` is restored after restart and is not stored in NVS.
 
 ## Security notes
 
