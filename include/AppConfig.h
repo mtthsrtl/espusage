@@ -20,6 +20,8 @@ struct AppConfig {
   uint16_t refreshMinutes = 5;
   uint8_t warningPercent = 70;
   uint8_t criticalPercent = 90;
+  uint32_t overpaceColor = 0xDDF542;
+  uint32_t warningColor = 0xF0A020;
   bool verifyTls = true;
   uint8_t displayStyle = 0;  // 0 = framed panels, 1 = open/frameless
   bool displayAvailable = false;

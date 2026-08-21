@@ -23,6 +23,8 @@ bool loadConfig(AppConfig &c) {
   c.refreshMinutes = prefs.getUShort("refresh", 5);
   c.warningPercent = prefs.getUChar("warn_pct", 70);
   c.criticalPercent = prefs.getUChar("crit_pct", 90);
+  c.overpaceColor = prefs.getUInt("over_color", 0xDDF542) & 0xFFFFFF;
+  c.warningColor = prefs.getUInt("warn_color", 0xF0A020) & 0xFFFFFF;
   c.verifyTls = prefs.getBool("tls", true);
   c.displayStyle = prefs.getUChar("ui_style", 0);
   if (c.displayStyle > 1) c.displayStyle = 0;
@@ -62,6 +64,7 @@ bool saveConfig(const AppConfig &c) {
   prefs.putString("cursor_tok", c.cursor.token); prefs.putString("cursor_sess", c.cursor.session);
   prefs.putUChar("bright", c.brightness); prefs.putUShort("refresh", c.refreshMinutes);
   prefs.putUChar("warn_pct", c.warningPercent); prefs.putUChar("crit_pct", c.criticalPercent);
+  prefs.putUInt("over_color", c.overpaceColor & 0xFFFFFF); prefs.putUInt("warn_color", c.warningColor & 0xFFFFFF);
   prefs.putBool("tls", c.verifyTls);
   prefs.putUChar("ui_style", c.displayStyle);
   prefs.putBool("ui_remaining", c.displayAvailable);
