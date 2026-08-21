@@ -26,15 +26,18 @@ static String remainingText(const char *iso) {
   return d ? "reset in "+String(d)+"d "+String(h)+"h" : "reset in "+String(h)+"h "+String(m)+"m";
 }
 UsageSnapshot CursorProvider::fetch(const ProviderConfig &cfg, bool tls) {
-  UsageSnapshot out; out.provider="Cursor"; out.primary.label="CURSOR MONTH"; out.secondary.label="OTHER MODELS";
+  UsageSnapshot out; out.provider="Cursor"; out.primary.label="CURSOR MODELS"; out.secondary.label="AUTO MODELS"; out.tertiary.label="API USAGE";
   if(!cfg.enabled){out.status="disabled";return out;} if(!cfg.token.length()){out.status="auth token missing";return out;}
   ProviderConfig request=cfg; request.token=""; request.session=cookieFor(cfg.token);
   JsonDocument d; String error; String url=cfg.endpoint.length()?cfg.endpoint:"https://cursor.com/api/usage-summary";
   if(!getJson(url,request,tls,d,error)){out.status=error;return out;}
   float autoUsed=d["individualUsage"]["plan"]["autoPercentUsed"]|-1.0f;
   float apiUsed=d["individualUsage"]["plan"]["apiPercentUsed"]|-1.0f;
-  out.primary.usedPercent=max(autoUsed,apiUsed); out.secondary.usedPercent=apiUsed;
-  out.primary.resetText=remainingText(d["billingCycleEnd"]|""); out.secondary.resetText="API / named models";
+  float totalUsed=d["individualUsage"]["plan"]["totalPercentUsed"]|-1.0f;
+  if(totalUsed<0) totalUsed=max(autoUsed,apiUsed);
+  String reset=remainingText(d["billingCycleEnd"]|"");
+  out.primary.usedPercent=totalUsed; out.secondary.usedPercent=autoUsed; out.tertiary.usedPercent=apiUsed;
+  out.primary.resetText=reset; out.secondary.resetText=reset; out.tertiary.resetText=reset;
   out.plan=String((const char*)(d["membershipType"]|"")); out.ok=out.primary.usedPercent>=0;
   out.status=out.ok?"online (unofficial)":"usage fields missing"; return out;
 }
