@@ -4,7 +4,7 @@ Native, standalone firmware for the 4-inch GUITION ESP32-S3 4848S040 (480×480).
 
 ## What is included
 
-- Modern 480×480 LVGL dashboard with selectable framed or flat design, individually selectable rows, wide progress bars, reset-period pace markers, and status colors
+- Modern 480×480 LVGL dashboard with Cursor/Codex provider icons, selectable framed or flat design, individually selectable rows, wide progress bars, reset-period pace markers, and status colors
 - Touch operation: short tap switches the whole dashboard between `USED` and `REMAINING`; long press opens details for the selected limit or 30-minute row
 - Six 5-minute activity buckets for Cursor tokens/calls and Codex weekly-limit changes
 - ST7701S RGB panel, GT911 touch, 150 Hz PWM backlight, octal PSRAM, and 16 MB flash configuration
@@ -12,12 +12,14 @@ Native, standalone firmware for the 4-inch GUITION ESP32-S3 4848S040 (480×480).
 - Browser-based Wi-Fi scan, network selection, password entry, and NVS-backed reset/reconfiguration
 - Local web configuration at `http://espusage.local/` or the IP shown on screen
 - Credentials saved only at runtime in ESP32 NVS; no secrets are compiled into the firmware or returned by diagnostics
-- Browser-upload OTA page, dual OTA partitions, `/api/health`, redacted `/api/status`, and credential-free live `/api/usage`
+- Browser-upload OTA page, dual OTA partitions, `/api/health`, redacted `/api/status`, credential-free live `/api/usage`, and live `/api/touch` diagnostics
 - Separate transport, Codex adapter, and Cursor provider modules
 
-The display pinout is based on the working [EspControl 4848S040 hardware definition](https://github.com/jtenniswood/espcontrol/blob/main/devices/guition-esp32-s3-4848s040/device/device.yaml): RGB data pins, GPIO 39/48/47 panel control, GPIO 18/17/16/21 timing, GPIO 19/45 GT911, and GPIO 38 backlight. The Arduino_GFX timings use the field-tested 10/8/50 horizontal and 10/8/20 vertical porch/pulse values.
+The display pinout is based on the working [EspControl 4848S040 hardware definition](https://github.com/jtenniswood/espcontrol/blob/main/devices/guition-esp32-s3-4848s040/device/device.yaml): RGB data pins, GPIO 39/48/47 panel control, GPIO 18/17/16/21 timing, GPIO 19/45 GT911, and GPIO 38 backlight. The Arduino_GFX timings use the field-tested 10/8/50 horizontal and 10/8/20 vertical porch/pulse values and the deliberate EspControl compromise of a 10 MHz pixel clock.
 
 Touch follows the same board-specific setup as EspControl: GT911 is polled every 16 ms on SDA GPIO19/SCL GPIO45 at the ESPHome default of 50 kHz, with no reset or interrupt GPIO assigned. Register selection and data reads use separate I²C transactions, and the ready flag is acknowledged before the current point buffer is read, matching ESPHome's GT911 driver. The firmware probes both supported addresses (`0x5D` and `0x14`), logs a full I²C scan when neither responds, and retries automatically after communication loss. GPIO41/42 are not touch pins on this board. EspControl's separate GSL3680 component is used by other Guition models and is not the touchscreen configuration for the 4848S040.
+
+The normal LAN web UI contains a live **Touch diagnostics** panel. It refreshes every two seconds and shows the I²C scan, detected controller/address, LVGL callback and GT911 poll counters, state-read errors, raw/display coordinates, and the separate down/up/tap/toggle counters. This makes serial access optional when diagnosing Touch after an OTA update.
 
 The 4848S040 can leave its RGB/touch peripherals in an unusable state after a software reset. Matching EspControl's board workaround, ESP Usage detects OTA and settings restarts and immediately enters a 100 ms deep sleep to force a clean hardware reset. An OTA update therefore produces two short boot sequences before the web portal becomes available again.
 
@@ -147,6 +149,7 @@ Tested with PlatformIO `espressif32@6.12.0`, Arduino-ESP32 2.0.17, Arduino_GFX 1
 | `/api/health` | GET | Minimal liveness response |
 | `/api/status` | GET | Redacted runtime/debug status |
 | `/api/usage` | GET | Current sanitized provider limits and 30-minute buckets; never credentials |
+| `/api/touch` | GET | Live I²C, GT911, coordinate, and gesture diagnostics; never credentials |
 | `/api/config` | POST | Save settings to NVS and restart |
 | `/api/wifi/scan` | GET | Scan nearby Wi-Fi networks |
 | `/api/wifi` | POST | Save selected Wi-Fi credentials and restart |
