@@ -24,7 +24,8 @@ static uint32_t touchLastPollMs = 0, touchLastFrameMs = 0, touchLastProbeMs = 0;
 static uint8_t touchReadErrors = 0;
 static bool touchPressed = false;
 static int touchX = 0, touchY = 0;
-static bool touchWasPressed = false, touchPendingToggle = false, detailsOpen = false;
+static bool touchWasPressed = false, touchPendingToggle = false, touchActivityPending = false;
+static bool touchWakeOnlyGesture = false, displayBacklightOn = true, detailsOpen = false;
 static uint32_t touchDownMs = 0;
 static int touchDownX = 0, touchDownY = 0;
 static String touchBusDevices = "not scanned", touchLastError = "not initialized", touchLastEvent = "none";
@@ -199,11 +200,10 @@ static void readTouch(lv_indev_drv_t *, lv_indev_data_t *data) {
       } else if (touchPressed && now - touchLastFrameMs > 120) touchPressed = false;
     }
   }
-  data->state = touchPressed ? LV_INDEV_STATE_PR : LV_INDEV_STATE_REL;
-  data->point.x = touchX;
-  data->point.y = touchY;
   if (touchPressed && !touchWasPressed) {
     touchDownMs = now; touchDownX = touchX; touchDownY = touchY;
+    touchActivityPending = true;
+    touchWakeOnlyGesture = !displayBacklightOn;
     touchDownEvents++; touchLastEventMs = now; touchLastEvent = "down";
     Serial.printf("[touch][gesture] down x=%d y=%d\n", touchX, touchY);
   }
@@ -212,13 +212,17 @@ static void readTouch(lv_indev_drv_t *, lv_indev_data_t *data) {
     int movement = abs(touchX - touchDownX) + abs(touchY - touchDownY);
     bool tap = duration >= 35 && duration <= 650 && movement <= 80;
     touchUpEvents++; touchLastEventMs = now; touchLastEvent = "up";
-    if (tap && !detailsOpen) {
+    if (tap && !detailsOpen && !touchWakeOnlyGesture) {
       touchPendingToggle = true; touchTapEvents++; touchLastEvent = "tap queued";
     }
     Serial.printf("[touch][gesture] up x=%d y=%d, duration=%lums, movement=%d -> %s\n",
                   touchX, touchY, (unsigned long)duration, movement,
-                  tap ? (detailsOpen ? "ignored (details open)" : "toggle queued") : "no tap");
+                  tap ? (touchWakeOnlyGesture ? "wake only" : detailsOpen ? "ignored (details open)" : "toggle queued") : "no tap");
+    touchWakeOnlyGesture = false;
   }
+  data->state = touchPressed && !touchWakeOnlyGesture ? LV_INDEV_STATE_PR : LV_INDEV_STATE_REL;
+  data->point.x = touchX;
+  data->point.y = touchY;
   touchWasPressed = touchPressed;
 }
 
@@ -442,7 +446,7 @@ static void makeUsageRow(lv_obj_t *parent, uint8_t index, int x, int y, int widt
   rows[index] = row; addTouchCallbacks(row, index);
   lv_obj_t *name = label(row, rowNames[index].c_str(), &lv_font_montserrat_14, C(0xF2F2F2)); lv_obj_set_pos(name, 0, 0);
   statusLabels[index] = label(row, "WAITING", &lv_font_montserrat_12, C(0x888888)); lv_obj_align(statusLabels[index], LV_ALIGN_TOP_RIGHT, -62, 1);
-  values[index] = label(row, "--%", &lv_font_montserrat_18, C(0xF2F2F2)); lv_obj_align(values[index], LV_ALIGN_TOP_RIGHT, 0, -2);
+  values[index] = label(row, "--%", &lv_font_montserrat_20, C(0xF2F2F2)); lv_obj_align(values[index], LV_ALIGN_TOP_RIGHT, 0, -3);
   bars[index] = lv_bar_create(row); lv_obj_set_size(bars[index], width, 7); lv_obj_set_pos(bars[index], 0, 19);
   lv_bar_set_range(bars[index], 0, 100); lv_obj_set_style_bg_color(bars[index], C(0x282828), LV_PART_MAIN);
   lv_obj_set_style_bg_opa(bars[index], LV_OPA_COVER, LV_PART_MAIN); lv_obj_set_style_radius(bars[index], 3, LV_PART_MAIN); lv_obj_set_style_radius(bars[index], 3, LV_PART_INDICATOR);
@@ -456,7 +460,7 @@ static void makeUsageRow(lv_obj_t *parent, uint8_t index, int x, int y, int widt
   // Keep the reset text visually attached to its own bar. The remaining row
   // height becomes a clear gap before the next metric instead of making the
   // reset look like a subtitle for the row below.
-  lv_obj_set_pos(resetLabels[index], 0, max(30, height - 29));
+  lv_obj_set_pos(resetLabels[index], 0, max(30, height - 23));
 }
 
 static void makePaceRow(lv_obj_t *parent, uint8_t provider, int x, int y, int width, int height) {
@@ -501,7 +505,7 @@ static lv_obj_t *makeProviderPanel(const char *title, uint8_t provider, int y, i
     lv_obj_set_style_img_recolor(providerIcon, C(0xFFFFFF), 0);
     lv_obj_set_style_img_recolor_opa(providerIcon, 180, 0);
   }
-  lv_obj_t *heading = label(panel, title, &lv_font_montserrat_18, C(0xFFFFFF)); lv_obj_set_pos(heading, innerX + 25, 3);
+  lv_obj_t *heading = label(panel, title, &lv_font_montserrat_20, C(0xFFFFFF)); lv_obj_set_pos(heading, innerX + 25, 2);
   providerStatusLabels[provider] = label(panel, "WAITING", &lv_font_montserrat_12, C(0x888888)); lv_obj_align(providerStatusLabels[provider], LV_ALIGN_TOP_RIGHT, -innerX, 6);
   lv_obj_t *divider = lv_obj_create(panel); lv_obj_set_size(divider, innerWidth, 1); lv_obj_set_pos(divider, innerX, 28);
   lv_obj_set_style_bg_color(divider, C(0x3A3A3A), 0); lv_obj_set_style_bg_opa(divider, LV_OPA_COVER, 0); lv_obj_set_style_border_width(divider, 0, 0); lv_obj_set_style_pad_all(divider, 0, 0);
@@ -527,7 +531,7 @@ void displayBegin(const AppConfig &config) {
 
   lv_obj_set_style_bg_color(lv_scr_act(), C(0x000000), 0); lv_obj_set_style_bg_opa(lv_scr_act(), LV_OPA_COVER, 0);
   lv_obj_add_flag(lv_scr_act(), LV_OBJ_FLAG_CLICKABLE);
-  lv_obj_t *title = label(lv_scr_act(), "AI USAGE", &lv_font_montserrat_18, C(0xFFFFFF)); lv_obj_set_pos(title, 16, 6);
+  lv_obj_t *title = label(lv_scr_act(), "AI USAGE", &lv_font_montserrat_20, C(0xFFFFFF)); lv_obj_set_pos(title, 16, 5);
   modeLabel = label(lv_scr_act(), "USED", &lv_font_montserrat_12, C(0xFFFFFF)); lv_obj_align(modeLabel, LV_ALIGN_TOP_MID, 0, 11);
   networkLabel = label(lv_scr_act(), "STARTING", &lv_font_montserrat_12, C(0xF2A93B)); lv_obj_align(networkLabel, LV_ALIGN_TOP_RIGHT, -16, 11);
 
@@ -600,7 +604,16 @@ void displayLoop() {
     toggleView();
   }
 }
-void displaySetBrightness(uint8_t value) { digitalWrite(38, value ? HIGH : LOW); }
+void displaySetBrightness(uint8_t value) {
+  displayBacklightOn = value > 0;
+  digitalWrite(38, displayBacklightOn ? HIGH : LOW);
+}
+
+bool displayConsumeTouchActivity() {
+  bool activity = touchActivityPending;
+  touchActivityPending = false;
+  return activity;
+}
 
 void displaySetNetwork(const String &text, bool connected) {
   networkAddress = connected ? text : "";

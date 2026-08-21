@@ -27,6 +27,11 @@ bool loadConfig(AppConfig &c) {
   c.displayStyle = prefs.getUChar("ui_style", 0);
   if (c.displayStyle > 1) c.displayStyle = 0;
   c.displayAvailable = prefs.getBool("ui_remaining", false);
+  c.displayOffEnabled = prefs.getBool("off_on", false);
+  c.displayOffFromMinutes = prefs.getUShort("off_from", 22 * 60);
+  c.displayOffUntilMinutes = prefs.getUShort("off_until", 7 * 60);
+  if (c.displayOffFromMinutes > 1439) c.displayOffFromMinutes = 22 * 60;
+  if (c.displayOffUntilMinutes > 1439) c.displayOffUntilMinutes = 7 * 60;
   c.showCursorModels = prefs.getBool("show_cur_main", true);
   c.showCursorOther = prefs.getBool("show_cur_other", true);
   c.showCursorOnDemand = prefs.getBool("show_cur_od", true);
@@ -60,6 +65,9 @@ bool saveConfig(const AppConfig &c) {
   prefs.putBool("tls", c.verifyTls);
   prefs.putUChar("ui_style", c.displayStyle);
   prefs.putBool("ui_remaining", c.displayAvailable);
+  prefs.putBool("off_on", c.displayOffEnabled);
+  prefs.putUShort("off_from", c.displayOffFromMinutes > 1439 ? 1439 : c.displayOffFromMinutes);
+  prefs.putUShort("off_until", c.displayOffUntilMinutes > 1439 ? 1439 : c.displayOffUntilMinutes);
   prefs.putBool("show_cur_main", c.showCursorModels); prefs.putBool("show_cur_other", c.showCursorOther);
   prefs.putBool("show_cur_od", c.showCursorOnDemand); prefs.putBool("show_cur_30m", c.showCursorThirtyMinute);
   prefs.remove("show_cdx_5h"); prefs.remove("codex_evt_url");

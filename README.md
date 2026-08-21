@@ -124,6 +124,8 @@ All three Cursor limits use `billingCycleStart` and `billingCycleEnd` for the re
 
 In `USED` mode a normal bar fills from the left with the consumed percentage. In `REMAINING` mode the displayed value is `100 − used` and the bar fills from the right; for example, 10% remaining occupies the rightmost 10%. The white pace marker is read as the remaining time from the right in that mode. The preferred mode can be selected persistently in the web UI, so Touch is not required. A short tap is recognized directly from the GT911 press/release gesture and temporarily switches modes until restart, independent of LVGL object hit-testing. The activity mini-charts always show consumption and are never inverted. A long press on a limit opens Used, Remaining, Reset, elapsed period, and provider status; long-pressing a 30-minute row opens Cursor token/call details or Codex measurement buckets.
 
+**Display Off Time** can switch the backlight off every day between a configured start and end time. The schedule uses Europe/Berlin local time including daylight-saving changes and can cross midnight. Touch remains active while the backlight is off: the first touch wakes the display without changing the Used/Remaining view, keeps it on for 60 seconds, and then returns to the off schedule. The settings page uses two equal columns on wider screens and automatically stacks them on phones.
+
 ## Security notes
 
 - `.gitignore` excludes the local `platformio.ini`, common secret files, and build output. `platformio.ini.example` contains placeholders only. There are no credentials or tokens in this repository.
