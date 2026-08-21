@@ -7,6 +7,7 @@ bool loadConfig(AppConfig &c) {
   if (!prefs.begin("espusage", true)) return false;
   c.wifiSsid = prefs.getString("ssid", "");
   c.wifiPassword = prefs.getString("wifi_pw", "");
+  c.wifiProvisioned = prefs.getBool("wifi_saved", false);
   c.hostname = prefs.getString("host", "espusage");
   c.codex.enabled = prefs.getBool("codex_on", false);
   c.codex.endpoint = prefs.getString("codex_url", "");
@@ -28,6 +29,7 @@ bool loadConfig(AppConfig &c) {
 bool saveConfig(const AppConfig &c) {
   if (!prefs.begin("espusage", false)) return false;
   prefs.putString("ssid", c.wifiSsid); prefs.putString("wifi_pw", c.wifiPassword);
+  prefs.putBool("wifi_saved", true);
   prefs.putString("host", c.hostname);
   prefs.putBool("codex_on", c.codex.enabled); prefs.putString("codex_url", c.codex.endpoint);
   prefs.putString("codex_tok", c.codex.token); prefs.putString("codex_sess", c.codex.session);
