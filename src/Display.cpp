@@ -460,7 +460,7 @@ static void makeUsageRow(lv_obj_t *parent, uint8_t index, int x, int y, int widt
   // Keep the reset text visually attached to its own bar. The remaining row
   // height becomes a clear gap before the next metric instead of making the
   // reset look like a subtitle for the row below.
-  lv_obj_set_pos(resetLabels[index], 0, max(30, height - 23));
+  lv_obj_set_pos(resetLabels[index], 0, max(30, height - 29));
 }
 
 static void makePaceRow(lv_obj_t *parent, uint8_t provider, int x, int y, int width, int height) {
