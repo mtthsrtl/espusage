@@ -2,6 +2,7 @@
 #include "providers/HttpJson.h"
 #include <ArduinoJson.h>
 #include <mbedtls/base64.h>
+#include <stdlib.h>
 #include <time.h>
 
 // UNDOCUMENTED CURSOR WEB API. Mirrors E:\Cursor_Usage's read-only flow.
@@ -60,6 +61,139 @@ static float onDemandPercent(JsonVariant bucket) {
   }
   return enabled?-1.0f:0.0f;
 }
+
+static uint64_t unsignedValue(JsonVariantConst value) {
+  if (value.is<const char *>()) return strtoull(value.as<const char *>(), nullptr, 10);
+  if (value.is<uint64_t>()) return value.as<uint64_t>();
+  if (value.is<long long>()) return value.as<long long>() < 0 ? 0 : (uint64_t)value.as<long long>();
+  return 0;
+}
+
+static float legacyCostCents(JsonVariantConst value) {
+  if (value.is<float>() || value.is<double>() || value.is<int>()) return value.as<float>() * 100.0f;
+  if (!value.is<const char *>()) return -1;
+  String text = value.as<const char *>();
+  text.replace("$", ""); text.replace(",", ""); text.trim();
+  return text.length() ? text.toFloat() * 100.0f : -1;
+}
+
+static void fetchRecentUsage(const ProviderConfig &request, bool tls, RecentUsage30m &recent) {
+  const uint16_t pageSize = 50;
+  const uint8_t maxPages = 10;
+  const uint64_t fiveMinutesMs = 5ULL * 60ULL * 1000ULL;
+  time_t nowSeconds = time(nullptr);
+  if (nowSeconds < 1700000000) {
+    recent.status = "waiting for clock";
+    Serial.println("[usage][cursor][30m] Waiting for NTP clock");
+    return;
+  }
+
+  uint64_t endMs = (uint64_t)nowSeconds * 1000ULL;
+  uint64_t startMs = endMs - 30ULL * 60ULL * 1000ULL;
+  String modelNames[12]; uint16_t modelCounts[12] = {}; uint8_t modelCount = 0;
+  String kindNames[8]; uint16_t kindCounts[8] = {}; uint8_t kindCount = 0;
+  uint16_t missingTokenCalls = 0;
+  bool anyCost = false, finished = false, firstPageOk = false;
+
+  for (uint8_t page = 1; page <= maxPages; ++page) {
+    String body;
+    body.reserve(128);
+    body = "{\"teamId\":0,\"startDate\":\"" + String(startMs) + "\",\"endDate\":\"" + String(endMs) +
+           "\",\"page\":" + String(page) + ",\"pageSize\":" + String(pageSize) + "}";
+    JsonDocument document; String error;
+    if (!postJson("https://cursor.com/api/dashboard/get-filtered-usage-events", request, tls, body, document, error)) {
+      recent.partial = firstPageOk;
+      recent.status = firstPageOk ? "partial: " + error : error;
+      Serial.printf("[usage][cursor][30m] Page %u failed: %s\n", page, error.c_str());
+      break;
+    }
+    firstPageOk = true;
+    JsonArray events = document["usageEventsDisplay"].as<JsonArray>();
+    if (events.isNull()) events = document["usageEvents"].as<JsonArray>();
+    if (events.isNull()) {
+      finished = true;
+      break;
+    }
+
+    for (JsonObject event : events) {
+      uint64_t timestampMs = unsignedValue(event["timestamp"]);
+      if (timestampMs && timestampMs < 100000000000ULL) timestampMs *= 1000ULL;
+      if (timestampMs < startMs || timestampMs > endMs) continue;
+      uint64_t bucketIndex = (timestampMs - startMs) / fiveMinutesMs;
+      uint8_t bucket = (uint8_t)(bucketIndex > 5 ? 5 : bucketIndex);
+      recent.calls++;
+      recent.buckets[bucket].calls++;
+
+      JsonObject tokenUsage = event["tokenUsage"].as<JsonObject>();
+      if (!tokenUsage.isNull()) {
+        bool hasTokenFields = !tokenUsage["inputTokens"].isNull() || !tokenUsage["outputTokens"].isNull() ||
+                              !tokenUsage["cacheWriteTokens"].isNull() || !tokenUsage["cacheReadTokens"].isNull();
+        uint64_t input = unsignedValue(tokenUsage["inputTokens"]);
+        uint64_t output = unsignedValue(tokenUsage["outputTokens"]);
+        uint64_t cacheWrite = unsignedValue(tokenUsage["cacheWriteTokens"]);
+        uint64_t cacheRead = unsignedValue(tokenUsage["cacheReadTokens"]);
+        uint64_t tokens = input + output + cacheWrite + cacheRead;
+        if (hasTokenFields) {
+          recent.tokenizedCalls++;
+          recent.inputTokens += input; recent.outputTokens += output;
+          recent.cacheWriteTokens += cacheWrite; recent.cacheReadTokens += cacheRead;
+          recent.buckets[bucket].tokens += tokens;
+        } else missingTokenCalls++;
+        if (!tokenUsage["totalCents"].isNull()) {
+          if (!anyCost) recent.costCents = 0;
+          recent.costCents += tokenUsage["totalCents"].as<float>(); anyCost = true;
+        }
+      } else {
+        missingTokenCalls++;
+      }
+      if (tokenUsage.isNull() && !event["usageBasedCosts"].isNull()) {
+        float cost = legacyCostCents(event["usageBasedCosts"]);
+        if (cost >= 0) { if (!anyCost) recent.costCents = 0; recent.costCents += cost; anyCost = true; }
+      }
+
+      String model = String((const char *)(event["model"] | ""));
+      if (model.length()) {
+        int found = -1;
+        for (uint8_t i = 0; i < modelCount; ++i) if (modelNames[i] == model) { found = i; break; }
+        if (found < 0 && modelCount < 12) { found = modelCount; modelNames[modelCount++] = model; }
+        if (found >= 0) modelCounts[found]++;
+      }
+      String kind = String((const char *)(event["customSubscriptionName"] | ""));
+      if (!kind.length()) kind = String((const char *)(event["kind"] | ""));
+      if (kind.length()) {
+        int found = -1;
+        for (uint8_t i = 0; i < kindCount; ++i) if (kindNames[i] == kind) { found = i; break; }
+        if (found < 0 && kindCount < 8) { found = kindCount; kindNames[kindCount++] = kind; }
+        if (found >= 0) kindCounts[found]++;
+      }
+      if (event["maxMode"] | false) recent.maxModeCalls++;
+    }
+
+    bool hasNext = events.size() >= pageSize;
+    JsonVariant paginationFlag = document["pagination"]["hasNextPage"];
+    if (!paginationFlag.isNull()) hasNext = paginationFlag.as<bool>();
+    if (!hasNext) { finished = true; break; }
+    if (page == maxPages) recent.partial = true;
+  }
+
+  if (!firstPageOk) return;
+  recent.available = true; recent.ready = true; recent.tokenData = recent.tokenizedCalls > 0;
+  for (RecentUsageBucket &bucket : recent.buckets) bucket.valid = true;
+  uint16_t bestCount = 0;
+  for (uint8_t i = 0; i < modelCount; ++i) if (modelCounts[i] > bestCount) { bestCount = modelCounts[i]; recent.topModel = modelNames[i]; }
+  bestCount = 0;
+  for (uint8_t i = 0; i < kindCount; ++i) if (kindCounts[i] > bestCount) { bestCount = kindCounts[i]; recent.topKind = kindNames[i]; }
+  if (!finished) recent.partial = true;
+  if (recent.partial) recent.status = "partial event data";
+  else if (!recent.calls) recent.status = "no activity";
+  else if (recent.tokenizedCalls < recent.calls) recent.status = "tokens for " + String(recent.tokenizedCalls) + "/" + String(recent.calls) + " calls";
+  else recent.status = "online";
+  uint64_t totalTokens = recent.inputTokens + recent.outputTokens + recent.cacheWriteTokens + recent.cacheReadTokens;
+  if (missingTokenCalls) Serial.printf("[usage][cursor][30m] Missing token fields for %u/%u calls\n", missingTokenCalls, recent.calls);
+  Serial.printf("[usage][cursor][30m] calls=%u, tokenized=%u, max-mode=%u, tokens=%llu, pages=%s\n",
+                recent.calls, recent.tokenizedCalls, recent.maxModeCalls, (unsigned long long)totalTokens, recent.partial ? "partial" : "complete");
+}
+
 UsageSnapshot CursorProvider::fetch(const ProviderConfig &cfg, bool tls) {
   UsageSnapshot out; out.provider="Cursor"; out.primary.label="CURSOR MODELS"; out.secondary.label="OTHER MODELS"; out.tertiary.label="ON DEMAND";
   if(!cfg.enabled){out.status="disabled";return out;} if(!cfg.token.length()){out.status="auth token missing";return out;}
@@ -77,6 +211,9 @@ UsageSnapshot CursorProvider::fetch(const ProviderConfig &cfg, bool tls) {
   out.primary.elapsedPercent=elapsed; out.secondary.elapsedPercent=elapsed; out.tertiary.elapsedPercent=elapsed;
   out.primary.resetText=reset; out.secondary.resetText=reset; out.tertiary.resetText=reset;
   out.plan=String((const char*)(d["membershipType"]|"")); out.ok=out.primary.usedPercent>=0||out.secondary.usedPercent>=0;
-  out.status=out.ok?"online (unofficial)":"usage fields missing"; return out;
+  out.status=out.ok?"online (unofficial)":"usage fields missing";
+  if (url.startsWith("https://cursor.com/api/")) fetchRecentUsage(request, tls, out.recent30m);
+  else out.recent30m.status = "custom endpoint";
+  return out;
 }
 

@@ -25,8 +25,10 @@ struct AppConfig {
   bool showCursorModels = true;
   bool showCursorOther = true;
   bool showCursorOnDemand = true;
-  bool showCodexFiveHour = true;
+  bool showCursorThirtyMinute = true;
+  bool showCodexFiveHour = false;
   bool showCodexWeekly = true;
+  bool showCodexThirtyMinute = true;
 };
 
 bool loadConfig(AppConfig &cfg);
