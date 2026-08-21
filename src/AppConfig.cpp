@@ -2,7 +2,7 @@
 #include <Preferences.h>
 
 static Preferences prefs;
-static constexpr uint8_t UI_CONFIG_VERSION = 2;
+static constexpr uint8_t UI_CONFIG_VERSION = 3;
 
 bool loadConfig(AppConfig &c) {
   if (!prefs.begin("espusage", true)) return false;
@@ -31,15 +31,15 @@ bool loadConfig(AppConfig &c) {
   c.showCursorOnDemand = prefs.getBool("show_cur_od", true);
   c.showCursorThirtyMinute = prefs.getBool("show_cur_30m", true);
   uint8_t uiConfigVersion = prefs.getUChar("ui_ver", 0);
-  c.showCodexFiveHour = uiConfigVersion < UI_CONFIG_VERSION ? false : prefs.getBool("show_cdx_5h", false);
   c.showCodexWeekly = prefs.getBool("show_cdx_7d", true);
-  c.showCodexThirtyMinute = prefs.getBool("show_cdx_30m", true);
   prefs.end();
   if (uiConfigVersion < UI_CONFIG_VERSION && prefs.begin("espusage", false)) {
-    prefs.putBool("show_cdx_5h", false);
+    prefs.remove("show_cdx_5h");
+    prefs.remove("show_cdx_30m");
+    prefs.remove("codex_evt_url");
     prefs.putUChar("ui_ver", UI_CONFIG_VERSION);
     prefs.end();
-    Serial.println("[config][nvs] Display settings migrated; Codex 5-hour row defaults to off");
+    Serial.println("[config][nvs] Display settings migrated; obsolete Codex 5-hour row removed");
   }
   return true;
 }
@@ -60,8 +60,8 @@ bool saveConfig(const AppConfig &c) {
   prefs.putUChar("ui_style", c.displayStyle);
   prefs.putBool("show_cur_main", c.showCursorModels); prefs.putBool("show_cur_other", c.showCursorOther);
   prefs.putBool("show_cur_od", c.showCursorOnDemand); prefs.putBool("show_cur_30m", c.showCursorThirtyMinute);
-  prefs.putBool("show_cdx_5h", c.showCodexFiveHour); prefs.putBool("show_cdx_7d", c.showCodexWeekly);
-  prefs.putBool("show_cdx_30m", c.showCodexThirtyMinute); prefs.putUChar("ui_ver", UI_CONFIG_VERSION);
+  prefs.remove("show_cdx_5h"); prefs.remove("show_cdx_30m"); prefs.remove("codex_evt_url");
+  prefs.putBool("show_cdx_7d", c.showCodexWeekly); prefs.putUChar("ui_ver", UI_CONFIG_VERSION);
   prefs.end();
   return true;
 }

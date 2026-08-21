@@ -25,13 +25,13 @@ static bool touchPressed = false;
 static int touchX = 0, touchY = 0;
 
 static lv_obj_t *networkLabel, *modeLabel, *providerStatusLabels[2];
-static lv_obj_t *statusLabels[5], *values[5], *bars[5], *paceMarkers[5], *resetLabels[5], *rows[5];
-static lv_obj_t *paceRows[2], *paceValues[2], *paceMeta[2], *paceColumns[2][6];
-static int barWidths[5], markerY[5];
-static String rowNames[5] = {"CURSOR MODELS","OTHER MODELS","ON DEMAND","5-HOUR LIMIT","WEEKLY LIMIT"};
-static UsageWindow rowData[5];
-static String rowStatus[5], networkAddress;
-static UsageSnapshot latestCodex, latestCursor;
+static lv_obj_t *statusLabels[4], *values[4], *bars[4], *paceMarkers[4], *resetLabels[4], *rows[4];
+static lv_obj_t *paceRows[1], *paceValues[1], *paceMeta[1], *paceColumns[1][6];
+static int barWidths[4], markerY[4], paceChartBaseline[1], paceChartMaxHeight[1];
+static String rowNames[4] = {"CURSOR MODELS","OTHER MODELS","ON DEMAND","WEEKLY LIMIT"};
+static UsageWindow rowData[4];
+static String rowStatus[4], networkAddress;
+static UsageSnapshot latestCursor;
 static bool availableView = false;
 static uint8_t warningLevel = 70, criticalLevel = 90;
 
@@ -56,8 +56,11 @@ static bool touchReadRegister(uint16_t reg, uint8_t *data, size_t length) {
   Wire.beginTransmission(touchAddress);
   Wire.write((uint8_t)(reg >> 8));
   Wire.write((uint8_t)(reg & 0xFF));
-  if (Wire.endTransmission(false) != 0) return false;
-  if (Wire.requestFrom(touchAddress, (uint8_t)length) != length) return false;
+  // ESPHome's working GT911 driver finishes the register-pointer write before
+  // starting the read. Some 4848S040 revisions do not answer reliably to the
+  // repeated-start transaction previously used here.
+  if (Wire.endTransmission(true) != 0) return false;
+  if (Wire.requestFrom(touchAddress, (uint8_t)length, (uint8_t)true) != length) return false;
   for (size_t i = 0; i < length; ++i) data[i] = Wire.read();
   return true;
 }
@@ -69,6 +72,19 @@ static bool touchWriteRegister(uint16_t reg, uint8_t value) {
   Wire.write((uint8_t)(reg & 0xFF));
   Wire.write(value);
   return Wire.endTransmission() == 0;
+}
+
+static void touchScanBus() {
+  String found;
+  for (uint8_t address = 1; address < 127; ++address) {
+    Wire.beginTransmission(address);
+    if (Wire.endTransmission(true) == 0) {
+      if (found.length()) found += ", ";
+      char item[8]; snprintf(item, sizeof(item), "0x%02X", address); found += item;
+    }
+  }
+  Serial.printf("[touch][i2c] Bus scan on SDA=%u/SCL=%u: %s\n", TOUCH_SDA, TOUCH_SCL,
+                found.length() ? found.c_str() : "no devices");
 }
 
 static bool touchProbe() {
@@ -96,10 +112,13 @@ static bool touchProbe() {
 static void touchBegin() {
   // EspControl leaves reset/interrupt unassigned on the 4848S040. GPIO41/42
   // are SD-card pins on this board and must never be toggled for touch setup.
+  pinMode(TOUCH_SDA, INPUT_PULLUP);
+  pinMode(TOUCH_SCL, INPUT_PULLUP);
   Wire.begin(TOUCH_SDA, TOUCH_SCL);
-  Wire.setClock(400000);
+  Wire.setClock(50000);  // EspControl/ESPHome default for this exact board.
+  Wire.setTimeOut(50);
   touchLastProbeMs = millis();
-  touchProbe();
+  if (!touchProbe()) touchScanBus();
 }
 
 static void readTouch(lv_indev_drv_t *, lv_indev_data_t *data) {
@@ -125,10 +144,11 @@ static void readTouch(lv_indev_drv_t *, lv_indev_data_t *data) {
       if (state & 0x80) {
         touchLastFrameMs = now;
         if (count > 0 && count <= 5) {
-          uint8_t point[8] = {};
-          if (touchReadRegister(GT911_FIRST_POINT, point, sizeof(point))) {
-            uint16_t rawX = (uint16_t)point[1] | ((uint16_t)point[2] << 8);
-            uint16_t rawY = (uint16_t)point[3] | ((uint16_t)point[4] << 8);
+          uint8_t points[41] = {};
+          uint8_t readLength = count * 8 + 1;  // all touches plus key byte
+          if (touchReadRegister(GT911_FIRST_POINT, points, readLength)) {
+            uint16_t rawX = (uint16_t)points[1] | ((uint16_t)points[2] << 8);
+            uint16_t rawY = (uint16_t)points[3] | ((uint16_t)points[4] << 8);
             // EspControl uses mirror_x/y=false and LVGL rotation=180. Our LVGL
             // framebuffer is unrotated, so apply that single 180° transform here.
             touchX = constrain(479 - (int)rawX, 0, 479);
@@ -136,7 +156,10 @@ static void readTouch(lv_indev_drv_t *, lv_indev_data_t *data) {
             touchPressed = true;
           }
         } else touchPressed = false;
-        touchWriteRegister(GT911_TOUCH_STATE, 0);
+        // Acknowledge only after the complete point frame has been consumed.
+        // Clearing it before reading 0x814F can race the controller update.
+        if (!touchWriteRegister(GT911_TOUCH_STATE, 0))
+          Serial.println("[touch][gt911] Could not acknowledge touch frame");
       } else if (touchPressed && now - touchLastFrameMs > 120) touchPressed = false;
     }
   }
@@ -194,12 +217,6 @@ static String usageState(float usedPercent) {
   return "OK";
 }
 
-static uint8_t validBucketCount(const RecentUsage30m &recent) {
-  uint8_t count = 0;
-  for (const RecentUsageBucket &bucket : recent.buckets) if (bucket.valid) count++;
-  return count;
-}
-
 static void closeModal(lv_event_t *event) {
   lv_obj_t *backdrop = (lv_obj_t *)lv_event_get_user_data(event);
   Serial.println("[touch] Details closed");
@@ -236,18 +253,6 @@ static String cursorPaceDetails() {
   return body;
 }
 
-static String codexPaceDetails() {
-  const RecentUsage30m &recent = latestCodex.recent30m;
-  String body = "Weekly change: +" + String(recent.deltaPercent, 2) + " pp\nMeasurements: " + String(recent.samples) +
-                "\nFilled buckets: " + String(validBucketCount(recent)) + "/6\n\n5-minute buckets:";
-  for (uint8_t i = 0; i < 6; ++i) {
-    body += "\n" + String(i + 1) + ": ";
-    body += recent.buckets[i].valid ? "+" + String(recent.buckets[i].deltaPercent, 2) + " pp" : String("no sample");
-  }
-  body += "\n\nStatus: " + (recent.status.length() ? recent.status : String("unavailable"));
-  return body;
-}
-
 static void openDetails(lv_event_t *event) {
   uint8_t index = (uint8_t)(uintptr_t)lv_event_get_user_data(event);
   Serial.printf("[touch] long press -> details=%u\n", index);
@@ -258,12 +263,12 @@ static void openDetails(lv_event_t *event) {
   lv_obj_clear_flag(backdrop, LV_OBJ_FLAG_SCROLLABLE); lv_obj_add_flag(backdrop, LV_OBJ_FLAG_CLICKABLE);
 
   lv_obj_t *modal = lv_obj_create(backdrop);
-  lv_obj_set_size(modal, 438, index < 5 ? 330 : 410); lv_obj_center(modal); panelStyle(modal);
+  lv_obj_set_size(modal, 438, index < 4 ? 330 : 410); lv_obj_center(modal); panelStyle(modal);
   lv_obj_set_style_pad_all(modal, 20, 0);
-  const char *titleText = index < 5 ? rowNames[index].c_str() : index == 5 ? "CURSOR / LAST 30 MIN" : "CODEX / LAST 30 MIN";
+  const char *titleText = index < 4 ? rowNames[index].c_str() : "CURSOR / LAST 30 MIN";
   lv_obj_t *title = label(modal, titleText, &lv_font_montserrat_20, C(0xF4F4F4));
   lv_obj_align(title, LV_ALIGN_TOP_LEFT, 0, 0);
-  String bodyText = index < 5 ? standardDetails(index) : index == 5 ? cursorPaceDetails() : codexPaceDetails();
+  String bodyText = index < 4 ? standardDetails(index) : cursorPaceDetails();
   lv_obj_t *body = label(modal, bodyText.c_str(), &lv_font_montserrat_14, C(0xB8B8B8));
   lv_obj_set_width(body, 390); lv_label_set_long_mode(body, LV_LABEL_LONG_WRAP); lv_obj_align(body, LV_ALIGN_TOP_LEFT, 0, 42);
   lv_obj_t *close = lv_btn_create(modal);
@@ -303,46 +308,39 @@ static void renderMetric(uint8_t index) {
   lv_label_set_text(resetLabels[index], bottom.c_str());
 }
 
-static void renderPace(uint8_t provider) {
+static void renderPace() {
+  constexpr uint8_t provider = 0;
   if (!paceRows[provider]) return;
-  const RecentUsage30m &recent = provider == 0 ? latestCursor.recent30m : latestCodex.recent30m;
+  const RecentUsage30m &recent = latestCursor.recent30m;
   String valueText, metaText;
-  bool tokenChart = false;
-  if (provider == 0) {
-    uint64_t tokens = totalTokens(recent);
-    tokenChart = recent.tokenData && tokens > 0;
-    if (!recent.available) valueText = "NO DATA";
-    else if (!recent.calls) valueText = "0 CALLS";
-    else if (recent.tokenData) valueText = formatTokens(tokens) + (recent.tokenizedCalls < recent.calls ? "+ TOK | " : " TOK | ") + String(recent.calls) + " CALLS";
-    else valueText = String(recent.calls) + " CALLS | TOK N/A";
-    metaText = tokenChart ? "TOKENS / 6 x 5 MIN" : "CALLS / 6 x 5 MIN";
-  } else {
-    if (!recent.available) valueText = "NO DATA";
-    else if (!recent.ready) valueText = "COLLECTING 1/2";
-    else valueText = "+" + String(recent.deltaPercent, 2) + " PP";
-    metaText = "WEEKLY CHANGE / 6 x 5 MIN";
-  }
+  uint64_t tokens = totalTokens(recent);
+  bool tokenChart = recent.tokenData && tokens > 0;
+  if (!recent.available) valueText = "NO DATA";
+  else if (!recent.calls) valueText = "0 CALLS";
+  else if (recent.tokenData) valueText = formatTokens(tokens) + (recent.tokenizedCalls < recent.calls ? "+ TOK | " : " TOK | ") + String(recent.calls) + " CALLS";
+  else valueText = String(recent.calls) + " CALLS | TOK N/A";
+  metaText = recent.topModel.length() ? recent.topModel : tokenChart ? "TOKENS / 6 x 5 MIN" : "CALLS / 6 x 5 MIN";
   lv_label_set_text(paceValues[provider], valueText.c_str());
   lv_label_set_text(paceMeta[provider], metaText.c_str());
 
   double maximum = 0;
   for (uint8_t i = 0; i < 6; ++i) {
-    double amount = provider == 0 ? (tokenChart ? (double)recent.buckets[i].tokens : recent.buckets[i].calls) : recent.buckets[i].deltaPercent;
+    double amount = tokenChart ? (double)recent.buckets[i].tokens : recent.buckets[i].calls;
     if (recent.buckets[i].valid && amount > maximum) maximum = amount;
   }
   for (uint8_t i = 0; i < 6; ++i) {
-    double amount = provider == 0 ? (tokenChart ? (double)recent.buckets[i].tokens : recent.buckets[i].calls) : recent.buckets[i].deltaPercent;
-    int height = !recent.buckets[i].valid ? 2 : maximum <= 0 || amount <= 0 ? 2 : 2 + (int)(16.0 * amount / maximum);
+    double amount = tokenChart ? (double)recent.buckets[i].tokens : recent.buckets[i].calls;
+    int height = !recent.buckets[i].valid ? 2 : maximum <= 0 || amount <= 0 ? 2 : 2 + (int)(paceChartMaxHeight[provider] * amount / maximum);
     lv_obj_set_height(paceColumns[provider][i], height);
-    lv_obj_set_y(paceColumns[provider][i], 39 - height);
+    lv_obj_set_y(paceColumns[provider][i], paceChartBaseline[provider] - height);
     lv_obj_set_style_bg_opa(paceColumns[provider][i], recent.buckets[i].valid ? LV_OPA_COVER : LV_OPA_20, 0);
   }
 }
 
 static void renderAll() {
   lv_label_set_text(modeLabel, availableView ? "AVAILABLE" : "USED");
-  for (uint8_t i = 0; i < 5; ++i) renderMetric(i);
-  renderPace(0); renderPace(1);
+  for (uint8_t i = 0; i < 4; ++i) renderMetric(i);
+  renderPace();
   lv_obj_invalidate(lv_scr_act()); lv_refr_now(nullptr);
 }
 
@@ -358,9 +356,9 @@ static void addTouchCallbacks(lv_obj_t *object, uint8_t detailIndex) {
   lv_obj_add_event_cb(object, openDetails, LV_EVENT_LONG_PRESSED, (void *)(uintptr_t)detailIndex);
 }
 
-static void makeUsageRow(lv_obj_t *parent, uint8_t index, int x, int y, int width) {
+static void makeUsageRow(lv_obj_t *parent, uint8_t index, int x, int y, int width, int height) {
   lv_obj_t *row = lv_obj_create(parent);
-  lv_obj_set_size(row, width, 46); lv_obj_set_pos(row, x, y);
+  lv_obj_set_size(row, width, height); lv_obj_set_pos(row, x, y);
   lv_obj_set_style_bg_opa(row, LV_OPA_TRANSP, 0); lv_obj_set_style_border_width(row, 0, 0);
   lv_obj_set_style_pad_all(row, 0, 0); lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
   rows[index] = row; addTouchCallbacks(row, index);
@@ -376,26 +374,29 @@ static void makeUsageRow(lv_obj_t *parent, uint8_t index, int x, int y, int widt
   lv_obj_set_style_bg_color(paceMarkers[index], C(0xFFFFFF), 0); lv_obj_set_style_bg_opa(paceMarkers[index], LV_OPA_COVER, 0);
   lv_obj_set_style_border_width(paceMarkers[index], 0, 0); lv_obj_set_style_radius(paceMarkers[index], 1, 0); lv_obj_set_style_pad_all(paceMarkers[index], 0, 0);
   lv_obj_clear_flag(paceMarkers[index], LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE); lv_obj_add_flag(paceMarkers[index], LV_OBJ_FLAG_HIDDEN);
-  resetLabels[index] = label(row, "Waiting for usage data", &lv_font_montserrat_12, C(0x929292)); lv_obj_set_pos(resetLabels[index], 0, 29);
+  resetLabels[index] = label(row, "Waiting for usage data", &lv_font_montserrat_12, C(0x929292)); lv_obj_set_pos(resetLabels[index], 0, height - 17);
 }
 
-static void makePaceRow(lv_obj_t *parent, uint8_t provider, int x, int y, int width) {
+static void makePaceRow(lv_obj_t *parent, int x, int y, int width, int height) {
+  constexpr uint8_t provider = 0;
   lv_obj_t *row = lv_obj_create(parent);
-  lv_obj_set_size(row, width, 48); lv_obj_set_pos(row, x, y);
+  lv_obj_set_size(row, width, height); lv_obj_set_pos(row, x, y);
   lv_obj_set_style_bg_opa(row, LV_OPA_TRANSP, 0); lv_obj_set_style_border_width(row, 0, 0); lv_obj_set_style_pad_all(row, 0, 0);
-  lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE); paceRows[provider] = row; addTouchCallbacks(row, provider == 0 ? 5 : 6);
+  lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE); paceRows[provider] = row; addTouchCallbacks(row, 4);
   lv_obj_t *topLine = lv_obj_create(row); lv_obj_set_size(topLine, width, 1); lv_obj_set_pos(topLine, 0, 0);
   lv_obj_set_style_bg_color(topLine, C(0x242424), 0); lv_obj_set_style_bg_opa(topLine, LV_OPA_COVER, 0); lv_obj_set_style_border_width(topLine, 0, 0); lv_obj_set_style_pad_all(topLine, 0, 0);
   lv_obj_clear_flag(topLine, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
   lv_obj_t *title = label(row, "LAST 30 MIN", &lv_font_montserrat_14, C(0xF2F2F2)); lv_obj_set_pos(title, 0, 5);
   paceValues[provider] = label(row, "WAITING", &lv_font_montserrat_14, C(0xF2F2F2)); lv_obj_align(paceValues[provider], LV_ALIGN_TOP_RIGHT, 0, 5);
-  paceMeta[provider] = label(row, provider == 0 ? "TOKENS / 6 x 5 MIN" : "WEEKLY CHANGE / 6 x 5 MIN", &lv_font_montserrat_12, C(0x929292));
-  lv_obj_set_pos(paceMeta[provider], 0, 29);
+  paceMeta[provider] = label(row, "TOKENS / 6 x 5 MIN", &lv_font_montserrat_12, C(0x929292));
+  lv_obj_set_pos(paceMeta[provider], 0, height - 18);
   int chartWidth = 142, gap = 4, columnWidth = (chartWidth - gap * 5) / 6, chartX = width - chartWidth;
+  paceChartBaseline[provider] = height - 6;
+  paceChartMaxHeight[provider] = constrain(height - 32, 16, 46);
   for (uint8_t i = 0; i < 6; ++i) {
     paceColumns[provider][i] = lv_obj_create(row);
-    lv_obj_set_size(paceColumns[provider][i], columnWidth, 2); lv_obj_set_pos(paceColumns[provider][i], chartX + i * (columnWidth + gap), 37);
-    lv_obj_set_style_bg_color(paceColumns[provider][i], C(provider == 0 ? 0x35D078 : 0x8295A8), 0);
+    lv_obj_set_size(paceColumns[provider][i], columnWidth, 2); lv_obj_set_pos(paceColumns[provider][i], chartX + i * (columnWidth + gap), paceChartBaseline[provider] - 2);
+    lv_obj_set_style_bg_color(paceColumns[provider][i], C(0x35D078), 0);
     lv_obj_set_style_bg_opa(paceColumns[provider][i], LV_OPA_20, 0); lv_obj_set_style_border_width(paceColumns[provider][i], 0, 0);
     lv_obj_set_style_radius(paceColumns[provider][i], 1, 0); lv_obj_set_style_pad_all(paceColumns[provider][i], 0, 0);
     lv_obj_clear_flag(paceColumns[provider][i], LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
@@ -418,8 +419,10 @@ static lv_obj_t *makeProviderPanel(const char *title, uint8_t provider, int y, i
 }
 
 void displayBegin(const AppConfig &config) {
-  pinMode(38, OUTPUT); digitalWrite(38, HIGH); gfx->begin(10000000); gfx->fillScreen(BLACK);
+  // Bring up the board's independent GT911 bus before the RGB peripheral.
+  // This also gives a useful boot-time probe even if LVGL never sees a press.
   touchBegin();
+  pinMode(38, OUTPUT); digitalWrite(38, HIGH); gfx->begin(10000000); gfx->fillScreen(BLACK);
   lv_init(); drawMemory = (lv_color_t *)heap_caps_malloc(480 * 32 * sizeof(lv_color_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
   lv_disp_draw_buf_init(&drawBuf, drawMemory, nullptr, 480 * 32);
   static lv_disp_drv_t displayDriver; lv_disp_drv_init(&displayDriver); displayDriver.hor_res = 480; displayDriver.ver_res = 480;
@@ -434,28 +437,49 @@ void displayBegin(const AppConfig &config) {
   networkLabel = label(lv_scr_act(), "STARTING", &lv_font_montserrat_12, C(0xF2A93B)); lv_obj_align(networkLabel, LV_ALIGN_TOP_RIGHT, -16, 17);
 
   bool flat = config.displayStyle == 1;
-  bool visible[5] = {config.showCursorModels, config.showCursorOther, config.showCursorOnDemand, config.showCodexFiveHour, config.showCodexWeekly};
+  bool visible[4] = {config.showCursorModels, config.showCursorOther, config.showCursorOnDemand, config.showCodexWeekly};
   uint8_t cursorCount = visible[0] + visible[1] + visible[2];
-  uint8_t codexCount = visible[3] + visible[4];
+  uint8_t codexCount = visible[3];
   bool cursorPaceVisible = config.showCursorThirtyMinute;
-  bool codexPaceVisible = config.showCodexThirtyMinute;
-  int cursorHeight = 34 + cursorCount * 46 + (cursorPaceVisible ? 48 : 0) + 4;
-  int codexHeight = 34 + codexCount * 46 + (codexPaceVisible ? 48 : 0) + 4;
+  uint8_t cursorUnits = cursorCount + (cursorPaceVisible ? 1 : 0);
+  uint8_t codexUnits = codexCount;
+  uint8_t panelCount = (cursorUnits ? 1 : 0) + (codexUnits ? 1 : 0);
+  uint8_t totalUnits = cursorUnits + codexUnits;
+  constexpr int panelHeader = 34, panelGap = 4, dashboardHeight = 434;
+  int contentHeight = dashboardHeight - panelHeader * panelCount - panelGap * (panelCount ? panelCount - 1 : 0);
+  int unitHeight = totalUnits ? max(46, contentHeight / totalUnits) : 46;
+  int remainder = totalUnits ? contentHeight - unitHeight * totalUnits : 0;
+  int cursorHeight = cursorUnits ? panelHeader + cursorUnits * unitHeight : 0;
+  int codexHeight = codexUnits ? panelHeader + codexUnits * unitHeight : 0;
+  if (remainder > 0) {
+    if (codexUnits) codexHeight += remainder;
+    else cursorHeight += remainder;
+  }
   int y = 42, innerX, innerWidth;
 
-  if (cursorCount || cursorPaceVisible) {
+  if (cursorUnits) {
     lv_obj_t *cursorPanel = makeProviderPanel("CURSOR", 0, y, cursorHeight, flat, innerX, innerWidth);
     int rowY = 34;
-    for (uint8_t i = 0; i < 3; ++i) if (visible[i]) { makeUsageRow(cursorPanel, i, innerX, rowY, innerWidth); rowY += 46; }
-    if (cursorPaceVisible) makePaceRow(cursorPanel, 0, innerX, rowY, innerWidth);
+    uint8_t made = 0;
+    int cursorExtra = !codexUnits ? max(0, remainder) : 0;
+    for (uint8_t i = 0; i < 3; ++i) if (visible[i]) {
+      made++;
+      int height = unitHeight + (!cursorPaceVisible && made == cursorCount ? cursorExtra : 0);
+      makeUsageRow(cursorPanel, i, innerX, rowY, innerWidth, height); rowY += height;
+    }
+    if (cursorPaceVisible) makePaceRow(cursorPanel, innerX, rowY, innerWidth, unitHeight + cursorExtra);
     y += cursorHeight + 4;
   }
-  if (codexCount || codexPaceVisible) {
+  if (codexUnits) {
     lv_obj_t *codexPanel = makeProviderPanel("CODEX", 1, y, codexHeight, flat, innerX, innerWidth);
     int rowY = 34;
-    for (uint8_t i = 3; i < 5; ++i) if (visible[i]) { makeUsageRow(codexPanel, i, innerX, rowY, innerWidth); rowY += 46; }
-    if (codexPaceVisible) makePaceRow(codexPanel, 1, innerX, rowY, innerWidth);
+    if (visible[3]) {
+      int height = unitHeight + max(0, remainder);
+      makeUsageRow(codexPanel, 3, innerX, rowY, innerWidth, height); rowY += height;
+    }
   }
+  Serial.printf("[display] Layout: Cursor units=%u, Codex units=%u, row=%dpx, bottom=%d\n",
+                cursorUnits, codexUnits, unitHeight, y + codexHeight);
   renderAll();
 }
 
@@ -470,11 +494,11 @@ void displaySetNetwork(const String &text, bool connected) {
 }
 
 void displayUpdate(const UsageSnapshot &codex, const UsageSnapshot &cursor, uint8_t warningPercent, uint8_t criticalPercent) {
-  latestCodex = codex; latestCursor = cursor; warningLevel = warningPercent; criticalLevel = criticalPercent;
+  latestCursor = cursor; warningLevel = warningPercent; criticalLevel = criticalPercent;
   rowData[0] = cursor.primary; rowData[1] = cursor.secondary; rowData[2] = cursor.tertiary;
-  rowData[3] = codex.primary; rowData[4] = codex.secondary;
+  rowData[3] = codex.secondary;
   for (uint8_t i = 0; i < 3; ++i) rowStatus[i] = cursor.status;
-  for (uint8_t i = 3; i < 5; ++i) rowStatus[i] = codex.status;
+  rowStatus[3] = codex.status;
   if (providerStatusLabels[0]) {
     lv_label_set_text(providerStatusLabels[0], cursor.ok ? "ONLINE" : cursor.status == "disabled" ? "DISABLED" : "NO DATA");
     lv_obj_set_style_text_color(providerStatusLabels[0], C(cursor.ok ? 0x45D597 : 0x888888), 0);
@@ -484,7 +508,7 @@ void displayUpdate(const UsageSnapshot &codex, const UsageSnapshot &cursor, uint
     lv_obj_set_style_text_color(providerStatusLabels[1], C(codex.ok ? 0x45D597 : 0x888888), 0);
   }
   renderAll();
-  Serial.printf("[display] view=%s, Cursor %.1f / %.1f / %.1f, Codex %.1f / %.1f\n",
+  Serial.printf("[display] view=%s, Cursor %.1f / %.1f / %.1f, Codex weekly %.1f\n",
                 availableView ? "available" : "used", cursor.primary.usedPercent, cursor.secondary.usedPercent,
-                cursor.tertiary.usedPercent, codex.primary.usedPercent, codex.secondary.usedPercent);
+                cursor.tertiary.usedPercent, codex.secondary.usedPercent);
 }
