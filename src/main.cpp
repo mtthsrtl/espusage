@@ -7,11 +7,13 @@
 #include "providers/CodexProvider.h"
 #include "providers/CursorProvider.h"
 static AppConfig config; static CodexProvider codex; static CursorProvider cursor; static UsageSnapshot cs,us; static uint32_t lastFetch=0;
+#define ESPUSAGE_STRINGIFY_INNER(value) #value
+#define ESPUSAGE_STRINGIFY(value) ESPUSAGE_STRINGIFY_INNER(value)
 #ifdef ESPUSAGE_WIFI_SSID
 static void applyBuildWifi() {
-  config.wifiSsid = ESPUSAGE_WIFI_SSID;
+  config.wifiSsid = ESPUSAGE_STRINGIFY(ESPUSAGE_WIFI_SSID);
   #ifdef ESPUSAGE_WIFI_PASSWORD
-  config.wifiPassword = ESPUSAGE_WIFI_PASSWORD;
+  config.wifiPassword = ESPUSAGE_STRINGIFY(ESPUSAGE_WIFI_PASSWORD);
   #endif
 }
 #else
