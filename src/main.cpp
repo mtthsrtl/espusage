@@ -19,7 +19,26 @@ static void applyBuildWifi() {
 #else
 static void applyBuildWifi() {}
 #endif
-static void connectWifi(){if(!config.wifiSsid.length()){WiFi.mode(WIFI_AP);WiFi.softAP("ESPUsage-Setup");displaySetNetwork("SETUP 192.168.4.1",false);return;}WiFi.mode(WIFI_STA);WiFi.setHostname(config.hostname.c_str());WiFi.begin(config.wifiSsid.c_str(),config.wifiPassword.c_str());uint32_t start=millis();while(WiFi.status()!=WL_CONNECTED&&millis()-start<15000){displayLoop();delay(10);}if(WiFi.status()==WL_CONNECTED){MDNS.begin(config.hostname);configTime(0,0,"pool.ntp.org","time.cloudflare.com");displaySetNetwork(WiFi.localIP().toString(),true);}else{WiFi.mode(WIFI_AP_STA);WiFi.softAP("ESPUsage-Recovery");displaySetNetwork("RECOVERY AP",false);}}
-void setup(){Serial.begin(115200);loadConfig(config);applyBuildWifi();displayBegin();displaySetBrightness(config.brightness);connectWifi();webBegin(config);}
+static void connectWifi(){
+  if(!config.wifiSsid.length()){
+    Serial.println("[wifi] No SSID configured; starting ESPUsage-Setup");
+    WiFi.mode(WIFI_AP);bool ok=WiFi.softAP("ESPUsage-Setup");
+    Serial.printf("[wifi] Setup AP: %s, IP: %s\n",ok?"started":"FAILED",WiFi.softAPIP().toString().c_str());
+    displaySetNetwork("SETUP 192.168.4.1",false);return;
+  }
+  Serial.printf("[wifi] Connecting to SSID: %s\n",config.wifiSsid.c_str());
+  WiFi.mode(WIFI_STA);WiFi.setHostname(config.hostname.c_str());WiFi.begin(config.wifiSsid.c_str(),config.wifiPassword.c_str());
+  uint32_t start=millis();while(WiFi.status()!=WL_CONNECTED&&millis()-start<15000){displayLoop();delay(10);}
+  if(WiFi.status()==WL_CONNECTED){
+    String ip=WiFi.localIP().toString();Serial.printf("[wifi] Connected. DHCP IP: %s, RSSI: %d dBm\n",ip.c_str(),WiFi.RSSI());
+    bool mdns=MDNS.begin(config.hostname);Serial.printf("[wifi] mDNS: http://%s.local/ (%s)\n",config.hostname.c_str(),mdns?"ready":"failed");
+    configTime(0,0,"pool.ntp.org","time.cloudflare.com");displaySetNetwork(ip,true);
+  }else{
+    Serial.printf("[wifi] Connection failed, status=%d; starting ESPUsage-Recovery\n",(int)WiFi.status());
+    WiFi.mode(WIFI_AP_STA);bool ok=WiFi.softAP("ESPUsage-Recovery");
+    Serial.printf("[wifi] Recovery AP: %s, IP: %s\n",ok?"started":"FAILED",WiFi.softAPIP().toString().c_str());displaySetNetwork("RECOVERY 192.168.4.1",false);
+  }
+}
+void setup(){Serial.begin(115200);delay(300);Serial.println("\n[boot] ESP Usage starting");loadConfig(config);applyBuildWifi();displayBegin();displaySetBrightness(config.brightness);connectWifi();webBegin(config);Serial.println("[boot] Web portal ready");}
 void loop(){displayLoop();webLoop();if(WiFi.status()==WL_CONNECTED&&(lastFetch==0||millis()-lastFetch>(uint32_t)config.refreshMinutes*60000UL)){lastFetch=millis();cs=codex.fetch(config.codex,config.verifyTls);us=cursor.fetch(config.cursor,config.verifyTls);displayUpdate(cs,us,config.warningPercent,config.criticalPercent);}delay(5);}
 
