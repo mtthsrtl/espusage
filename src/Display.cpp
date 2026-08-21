@@ -252,24 +252,30 @@ static String formatTokens(uint64_t value) {
   return formatUnsigned(value);
 }
 
-static lv_color_t usageColor(float usedPercent) {
-  if (usedPercent < 0) return C(0x7D7D7D);
-  if (usedPercent >= criticalLevel) return C(0xFF5050);
-  if (usedPercent >= warningLevel) return C(0xF0A020);
-  return C(0x35D078);
+enum class UsageLevel : uint8_t { NoData, Ok, Overpace, Warning, Critical };
+
+static UsageLevel usageLevel(const UsageWindow &window) {
+  if (window.usedPercent < 0) return UsageLevel::NoData;
+  if (window.usedPercent >= criticalLevel) return UsageLevel::Critical;
+  if (window.usedPercent >= warningLevel) return UsageLevel::Warning;
+  if (window.elapsedPercent >= 0 && window.usedPercent > window.elapsedPercent) return UsageLevel::Overpace;
+  return UsageLevel::Ok;
 }
 
-static String usageState(float usedPercent) {
-  if (usedPercent < 0) return "NO DATA";
-  if (!availableView) {
-    if (usedPercent >= criticalLevel) return "CRITICAL";
-    if (usedPercent >= warningLevel) return "WARNING";
-    return "OK";
-  }
-  float available = 100.0f - usedPercent;
-  if (available <= 100 - criticalLevel) return "LOW";
-  if (available <= 100 - warningLevel) return "WATCH";
-  return "OK";
+static lv_color_t usageColor(UsageLevel level) {
+  if (level == UsageLevel::Critical) return C(0xFF5050);
+  if (level == UsageLevel::Warning) return C(0xF0A020);
+  if (level == UsageLevel::Overpace) return C(0xE7C547);
+  if (level == UsageLevel::Ok) return C(0x35D078);
+  return C(0x7D7D7D);
+}
+
+static const char *usageState(UsageLevel level) {
+  if (level == UsageLevel::Critical) return "CRITICAL";
+  if (level == UsageLevel::Warning) return "WARNING";
+  if (level == UsageLevel::Overpace) return "OVERPACE";
+  if (level == UsageLevel::Ok) return "OK";
+  return "NO DATA";
 }
 
 static uint8_t validBucketCount(const RecentUsage30m &recent) {
@@ -295,6 +301,7 @@ static String standardDetails(uint8_t index) {
       body += "\nPeriod elapsed: " + String(window.elapsedPercent, 1) + "%";
       body += "\nPeriod remaining: " + String(100.0f - window.elapsedPercent, 1) + "%";
     }
+    body += "\nStatus: " + String(usageState(usageLevel(window)));
   }
   body += "\n\n" + (window.resetText.length() ? window.resetText : String("Reset unavailable"));
   body += "\nProvider: " + rowStatus[index];
@@ -359,10 +366,10 @@ static void renderMetric(uint8_t index) {
   const UsageWindow &window = rowData[index];
   float used = window.usedPercent;
   float shown = used < 0 ? -1 : availableView ? 100.0f - used : used;
-  lv_color_t color = usageColor(used);
+  UsageLevel level = usageLevel(window);
+  lv_color_t color = usageColor(level);
   String valueText = shown < 0 ? "--%" : String(shown, 0) + "%";
-  String state = usageState(used);
-  lv_label_set_text(statusLabels[index], state.c_str()); lv_obj_set_style_text_color(statusLabels[index], color, 0);
+  lv_label_set_text(statusLabels[index], usageState(level)); lv_obj_set_style_text_color(statusLabels[index], color, 0);
   lv_label_set_text(values[index], valueText.c_str()); lv_obj_set_style_text_color(values[index], color, 0);
   lv_obj_set_style_base_dir(bars[index], availableView ? LV_BASE_DIR_RTL : LV_BASE_DIR_LTR, 0);
   lv_obj_set_style_bg_color(bars[index], color, LV_PART_INDICATOR);
