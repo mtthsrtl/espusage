@@ -56,9 +56,12 @@ void displaySetNetwork(const String &s,bool connected){networkAddress=connected?
 static void updateRow(int i,const UsageWindow &w,const String &providerStatus,uint8_t warning,uint8_t critical){
   rowData[i]=w;rowStatus[i]=providerStatus;float p=w.usedPercent;lv_color_t color;String state;
   if(p<0){color=C(0x7D7D7D);state="NO DATA";}else if(p>=critical){color=C(0xFF4040);state="CRITICAL";}else if(p>=warning){color=C(0xF0A020);state="WARNING";}else{color=C(0x35D078);state="OK";}
-  lv_label_set_text(statusLabels[i],state.c_str());lv_obj_set_style_text_color(statusLabels[i],color,0);lv_label_set_text(values[i],p<0?"--%":(String(p,0)+"%").c_str());lv_obj_set_style_text_color(values[i],color,0);lv_obj_set_style_bg_color(bars[i],color,LV_PART_INDICATOR);lv_bar_set_value(bars[i],p<0?0:(int)constrain(p,0,100),LV_ANIM_ON);
+  String valueText=p<0?"--%":String(p,0)+"%";lv_label_set_text(statusLabels[i],state.c_str());lv_obj_set_style_text_color(statusLabels[i],color,0);lv_label_set_text(values[i],valueText.c_str());lv_obj_set_style_text_color(values[i],color,0);lv_obj_set_style_bg_color(bars[i],color,LV_PART_INDICATOR);lv_bar_set_value(bars[i],p<0?0:(int)constrain(p,0,100),LV_ANIM_OFF);
   String bottom=w.resetText.length()?w.resetText:providerStatus;if(p<0&&networkAddress.length()&&(providerStatus=="disabled"||providerStatus.indexOf("missing")>=0))bottom="Setup: http://"+networkAddress;lv_label_set_text(resetLabels[i],bottom.c_str());
 }
 void displayUpdate(const UsageSnapshot &codex,const UsageSnapshot &cursor,uint8_t warning,uint8_t critical){
   updateRow(0,cursor.primary,cursor.status,warning,critical);updateRow(1,cursor.secondary,cursor.status,warning,critical);updateRow(2,cursor.tertiary,cursor.status,warning,critical);updateRow(3,codex.primary,codex.status,warning,critical);updateRow(4,codex.secondary,codex.status,warning,critical);
+  Serial.printf("[display] Cursor %.1f / %.1f / %.1f, Codex %.1f / %.1f\n",cursor.primary.usedPercent,cursor.secondary.usedPercent,cursor.tertiary.usedPercent,codex.primary.usedPercent,codex.secondary.usedPercent);
+  lv_obj_invalidate(lv_scr_act());lv_refr_now(nullptr);
 }
+

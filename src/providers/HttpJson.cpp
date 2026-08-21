@@ -11,7 +11,7 @@ static bool request(const String &method, const String &url, const ProviderConfi
   HTTPClient http;
   if (!url.startsWith("https://")) { error = "HTTPS required"; return false; }
   if (!http.begin(client, url)) { error = "connection setup failed"; return false; }
-  http.setTimeout(15000); http.addHeader("Accept", "application/json");
+  http.setTimeout(15000); http.setUserAgent("ESPUsage/1.0"); http.addHeader("Accept", "application/json");
   if (url.indexOf("api2.cursor.sh/aiserver.v1.DashboardService/") >= 0)
     http.addHeader("Connect-Protocol-Version", "1");
   if (cfg.token.length()) http.addHeader("Authorization", "Bearer " + cfg.token);
@@ -28,4 +28,5 @@ static bool request(const String &method, const String &url, const ProviderConfi
 }
 bool getJson(const String &u, const ProviderConfig &c, bool t, JsonDocument &d, String &e) { return request("GET",u,c,t,"",d,e); }
 bool postJson(const String &u, const ProviderConfig &c, bool t, const String &b, JsonDocument &d, String &e) { return request("POST",u,c,t,b,d,e); }
+
 
