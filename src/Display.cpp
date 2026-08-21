@@ -434,9 +434,9 @@ static lv_obj_t *makeProviderPanel(const char *title, uint8_t provider, int y, i
   lv_obj_set_style_pad_all(panel, 0, 0); lv_obj_clear_flag(panel, LV_OBJ_FLAG_SCROLLABLE); lv_obj_clear_flag(panel, LV_OBJ_FLAG_CLICKABLE);
   if (flat) { lv_obj_set_style_bg_opa(panel, LV_OPA_TRANSP, 0); lv_obj_set_style_border_width(panel, 0, 0); }
   else panelStyle(panel);
-  lv_obj_t *heading = label(panel, title, &lv_font_montserrat_20, C(0xFFFFFF)); lv_obj_set_pos(heading, innerX, 4);
-  providerStatusLabels[provider] = label(panel, "WAITING", &lv_font_montserrat_12, C(0x888888)); lv_obj_align(providerStatusLabels[provider], LV_ALIGN_TOP_RIGHT, -innerX, 8);
-  lv_obj_t *divider = lv_obj_create(panel); lv_obj_set_size(divider, innerWidth, 1); lv_obj_set_pos(divider, innerX, 30);
+  lv_obj_t *heading = label(panel, title, &lv_font_montserrat_20, C(0xFFFFFF)); lv_obj_set_pos(heading, innerX, 2);
+  providerStatusLabels[provider] = label(panel, "WAITING", &lv_font_montserrat_12, C(0x888888)); lv_obj_align(providerStatusLabels[provider], LV_ALIGN_TOP_RIGHT, -innerX, 6);
+  lv_obj_t *divider = lv_obj_create(panel); lv_obj_set_size(divider, innerWidth, 1); lv_obj_set_pos(divider, innerX, 28);
   lv_obj_set_style_bg_color(divider, C(0x3A3A3A), 0); lv_obj_set_style_bg_opa(divider, LV_OPA_COVER, 0); lv_obj_set_style_border_width(divider, 0, 0); lv_obj_set_style_pad_all(divider, 0, 0);
   lv_obj_clear_flag(divider, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
   return panel;
@@ -457,9 +457,9 @@ void displayBegin(const AppConfig &config) {
 
   lv_obj_set_style_bg_color(lv_scr_act(), C(0x000000), 0); lv_obj_set_style_bg_opa(lv_scr_act(), LV_OPA_COVER, 0);
   lv_obj_add_flag(lv_scr_act(), LV_OBJ_FLAG_CLICKABLE); lv_obj_add_event_cb(lv_scr_act(), toggleView, LV_EVENT_SHORT_CLICKED, nullptr);
-  lv_obj_t *title = label(lv_scr_act(), "AI USAGE", &lv_font_montserrat_20, C(0xFFFFFF)); lv_obj_set_pos(title, 16, 11);
-  modeLabel = label(lv_scr_act(), "USED", &lv_font_montserrat_12, C(0xFFFFFF)); lv_obj_align(modeLabel, LV_ALIGN_TOP_MID, 0, 17);
-  networkLabel = label(lv_scr_act(), "STARTING", &lv_font_montserrat_12, C(0xF2A93B)); lv_obj_align(networkLabel, LV_ALIGN_TOP_RIGHT, -16, 17);
+  lv_obj_t *title = label(lv_scr_act(), "AI USAGE", &lv_font_montserrat_20, C(0xFFFFFF)); lv_obj_set_pos(title, 16, 5);
+  modeLabel = label(lv_scr_act(), "USED", &lv_font_montserrat_12, C(0xFFFFFF)); lv_obj_align(modeLabel, LV_ALIGN_TOP_MID, 0, 11);
+  networkLabel = label(lv_scr_act(), "STARTING", &lv_font_montserrat_12, C(0xF2A93B)); lv_obj_align(networkLabel, LV_ALIGN_TOP_RIGHT, -16, 11);
 
   bool flat = config.displayStyle == 1;
   bool visible[4] = {config.showCursorModels, config.showCursorOther, config.showCursorOnDemand, config.showCodexWeekly};
@@ -471,7 +471,8 @@ void displayBegin(const AppConfig &config) {
   uint8_t codexUnits = codexCount + (codexPaceVisible ? 1 : 0);
   uint8_t panelCount = (cursorUnits ? 1 : 0) + (codexUnits ? 1 : 0);
   uint8_t totalUnits = cursorUnits + codexUnits;
-  constexpr int panelHeader = 34, panelGap = 4, dashboardHeight = 434;
+  constexpr int panelHeader = 32, panelGap = 4, dashboardTop = 34, dashboardBottom = 478;
+  constexpr int dashboardHeight = dashboardBottom - dashboardTop;
   int contentHeight = dashboardHeight - panelHeader * panelCount - panelGap * (panelCount ? panelCount - 1 : 0);
   int unitHeight = totalUnits ? max(46, contentHeight / totalUnits) : 46;
   int remainder = totalUnits ? contentHeight - unitHeight * totalUnits : 0;
@@ -481,11 +482,11 @@ void displayBegin(const AppConfig &config) {
     if (codexUnits) codexHeight += remainder;
     else cursorHeight += remainder;
   }
-  int y = 42, innerX, innerWidth;
+  int y = dashboardTop, innerX, innerWidth;
 
   if (cursorUnits) {
     lv_obj_t *cursorPanel = makeProviderPanel("CURSOR", 0, y, cursorHeight, flat, innerX, innerWidth);
-    int rowY = 34;
+    int rowY = panelHeader;
     uint8_t made = 0;
     int cursorExtra = !codexUnits ? max(0, remainder) : 0;
     for (uint8_t i = 0; i < 3; ++i) if (visible[i]) {
@@ -498,7 +499,7 @@ void displayBegin(const AppConfig &config) {
   }
   if (codexUnits) {
     lv_obj_t *codexPanel = makeProviderPanel("CODEX", 1, y, codexHeight, flat, innerX, innerWidth);
-    int rowY = 34;
+    int rowY = panelHeader;
     if (visible[3]) {
       int height = unitHeight + (!codexPaceVisible ? max(0, remainder) : 0);
       makeUsageRow(codexPanel, 3, innerX, rowY, innerWidth, height); rowY += height;
