@@ -24,6 +24,7 @@ struct RecentUsage30m {
   uint16_t calls = 0;
   uint16_t tokenizedCalls = 0;
   uint16_t maxModeCalls = 0;
+  uint16_t samples = 0;
   uint64_t inputTokens = 0;
   uint64_t outputTokens = 0;
   uint64_t cacheWriteTokens = 0;
