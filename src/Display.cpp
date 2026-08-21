@@ -713,4 +713,3 @@ void displayUpdate(const UsageSnapshot &codex, const UsageSnapshot &cursor, uint
                 availableView ? "remaining" : "used", cursor.primary.usedPercent, cursor.secondary.usedPercent,
                 cursor.tertiary.usedPercent, codex.secondary.usedPercent);
 }
-
