@@ -17,7 +17,9 @@ Native, standalone firmware for the 4-inch GUITION ESP32-S3 4848S040 (480×480).
 
 The display pinout is based on the working [EspControl 4848S040 hardware definition](https://github.com/jtenniswood/espcontrol/blob/main/devices/guition-esp32-s3-4848s040/device/device.yaml): RGB data pins, GPIO 39/48/47 panel control, GPIO 18/17/16/21 timing, GPIO 19/45 GT911, and GPIO 38 backlight. The Arduino_GFX timings use the field-tested 10/8/50 horizontal and 10/8/20 vertical porch/pulse values.
 
-Touch follows the same board-specific setup as EspControl: GT911 is polled every 16 ms on SDA GPIO19/SCL GPIO45 at the ESPHome default of 50 kHz, with no reset or interrupt GPIO assigned. Register selection and data reads use separate I²C transactions, and the ready flag is acknowledged before the current point buffer is read, matching ESPHome's GT911 driver. The firmware probes both supported addresses (`0x5D` and `0x14`), logs a full I²C scan when neither responds, and retries automatically after communication loss. GPIO41/42 are not touch pins on this board.
+Touch follows the same board-specific setup as EspControl: GT911 is polled every 16 ms on SDA GPIO19/SCL GPIO45 at the ESPHome default of 50 kHz, with no reset or interrupt GPIO assigned. Register selection and data reads use separate I²C transactions, and the ready flag is acknowledged before the current point buffer is read, matching ESPHome's GT911 driver. The firmware probes both supported addresses (`0x5D` and `0x14`), logs a full I²C scan when neither responds, and retries automatically after communication loss. GPIO41/42 are not touch pins on this board. EspControl's separate GSL3680 component is used by other Guition models and is not the touchscreen configuration for the 4848S040.
+
+The 4848S040 can leave its RGB/touch peripherals in an unusable state after a software reset. Matching EspControl's board workaround, ESP Usage detects OTA and settings restarts and immediately enters a 100 ms deep sleep to force a clean hardware reset. An OTA update therefore produces two short boot sequences before the web portal becomes available again.
 
 ## Important: first installation from EspControl
 
