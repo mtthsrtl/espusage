@@ -1,9 +1,8 @@
 # ESP Usage for GUITION 4848S040
+
 <img width="480" height="480" alt="espusage-live" src="https://github.com/user-attachments/assets/5dae4c96-af69-479b-8966-f2922e78a7d0" />
 
-
-Native, standalone firmware for the 4-inch GUITION ESP32-S3 4848S040 (480×480). It replaces ESPHome/EspControl and provides a touch-first dark usage dashboard, local configuration portal, NVS persistence, modular HTTPS providers, OTA updates, and diagnostics.
-
+Native, standalone firmware for the 4-inch GUITION ESP32-S3 4848S040 (480×480), providing a touch-first dark usage dashboard, local configuration portal, NVS persistence, modular HTTPS providers, OTA updates, and diagnostics.
 
 ## What is included
 
@@ -14,21 +13,17 @@ Native, standalone firmware for the 4-inch GUITION ESP32-S3 4848S040 (480×480).
 - Wi-Fi station mode plus automatic setup/recovery AP (`ESPUsage-Setup`)
 - Browser-based Wi-Fi scan, network selection, password entry, and NVS-backed reset/reconfiguration
 - Local web configuration at `http://espusage.local/` or the IP shown on screen
-- Credentials saved only at runtime in ESP32 NVS; no secrets are compiled into the firmware or returned by diagnostics
-- Browser-upload OTA page, dual OTA partitions, `/api/health`, redacted `/api/status`, credential-free live `/api/usage`, and live `/api/touch` diagnostics
+- Runtime configuration stored in ESP32 NVS; provider secrets are not compiled into firmware or returned by diagnostics
+- Browser-upload OTA page, dual OTA partitions, `/api/health`, redacted `/api/status`, sanitized live `/api/usage`, and live `/api/touch` diagnostics
 - Separate transport, Codex adapter, and Cursor provider modules
 
-The display pinout is based on the working [EspControl 4848S040 hardware definition](https://github.com/jtenniswood/espcontrol/blob/main/devices/guition-esp32-s3-4848s040/device/device.yaml): RGB data pins, GPIO 39/48/47 panel control, GPIO 18/17/16/21 timing, GPIO 19/45 GT911, and GPIO 38 backlight. The Arduino_GFX timings use the field-tested 10/8/50 horizontal and 10/8/20 vertical porch/pulse values and the deliberate EspControl compromise of a 10 MHz pixel clock.
+The display uses the 4848S040 RGB pinout: GPIO 39/48/47 for panel control, GPIO 18/17/16/21 for timing, GPIO 19/45 for GT911 touch, and GPIO 38 for the backlight. Arduino_GFX is configured with 10/8/50 horizontal and 10/8/20 vertical porch/pulse values at a 10 MHz pixel clock.
 
-Touch follows the same board-specific setup as EspControl: GT911 is polled every 16 ms on SDA GPIO19/SCL GPIO45 at the ESPHome default of 50 kHz, with no reset or interrupt GPIO assigned. Register selection and data reads use separate I²C transactions, and the ready flag is acknowledged before the current point buffer is read, matching ESPHome's GT911 driver. The firmware probes both supported addresses (`0x5D` and `0x14`), logs a full I²C scan when neither responds, and retries automatically after communication loss. GPIO41/42 are not touch pins on this board. EspControl's separate GSL3680 component is used by other Guition models and is not the touchscreen configuration for the 4848S040.
+GT911 is polled every 16 ms on SDA GPIO19/SCL GPIO45 at 50 kHz, with no reset or interrupt GPIO assigned. Register selection and data reads use separate I²C transactions, and the ready flag is acknowledged before the current point buffer is read. The firmware probes both supported addresses (`0x5D` and `0x14`), logs a full I²C scan when neither responds, and retries automatically after communication loss. GPIO41/42 are SD-card pins and are not used for touch on this board.
 
 The normal LAN web UI contains a live **Touch diagnostics** panel. It refreshes every two seconds and shows the I²C scan, detected controller/address, LVGL callback and GT911 poll counters, state-read errors, raw/display coordinates, and the separate down/up/tap/toggle counters. This makes serial access optional when diagnosing Touch after an OTA update.
 
-The 4848S040 can leave its RGB/touch peripherals in an unusable state after a software reset. Matching EspControl's board workaround, ESP Usage detects OTA and settings restarts and immediately enters a 100 ms deep sleep to force a clean hardware reset. An OTA update therefore produces two short boot sequences before the web portal becomes available again.
-
-## Important: first installation from EspControl
-
-Do **not** install this firmware through EspControl's existing web updater. EspControl and ESP Usage can use different partition tables and OTA metadata. An application-only upload may boot-loop or leave no valid fallback image. The first switch must be done once over USB-C; subsequent ESP Usage updates can use the built-in web updater.
+The 4848S040 can leave its RGB/touch peripherals in an unusable state after a software reset. ESP Usage detects OTA and settings restarts and immediately enters a 100 ms deep sleep to force a clean hardware reset. An OTA update therefore produces two short boot sequences before the web portal becomes available again.
 
 ### Windows USB-C flash (exact steps)
 
@@ -66,7 +61,7 @@ Do **not** install this firmware through EspControl's existing web updater. EspC
 
 If the saved network cannot be reached after three connection attempts, the device automatically starts **ESPUsage-Setup** again. The same Wi-Fi scanner is available later under **Settings / WiFi** in the normal LAN web UI. **Delete WiFi configuration** removes only the Wi-Fi credentials from NVS and restarts the setup AP; provider and display settings remain intact.
 
-The USB upload writes the bootloader, partition table, OTA metadata, and application at their correct offsets. Existing EspControl configuration is erased/ignored; keep a backup if you may want to return to it.
+The USB upload writes the bootloader, partition table, OTA metadata, and application at their correct offsets. Existing firmware configuration is erased or ignored; keep a backup if you may want to return to it.
 
 ### Later OTA updates
 
@@ -92,9 +87,9 @@ If OTA is interrupted, the ESP32 bootloader retains the previously valid OTA slo
 
 OpenAI documents where users can view Codex limits and credits (Codex Settings → Usage), but does not document a public consumer REST endpoint for retrieving the five-hour/weekly ChatGPT Codex gauges. See [Using Codex with your ChatGPT plan](https://help.openai.com/en/articles/11369540) and the [Codex rate card](https://help.openai.com/en/articles/20001106).
 
-The web UI can use the Codex app OAuth credentials stored locally in `%USERPROFILE%\.codex\auth.json`. Copy `tokens.access_token` into **Codex access_token** and, when present, copy `tokens.account_id` into **ChatGPT account_id**. With the adapter URL left empty, the firmware sends these values to the same unofficial read-only usage route used by the local companion widget. Access tokens expire; this ESP32 firmware deliberately does not store a refresh token or perform an OAuth refresh. Replace the access token in the web UI when the display reports HTTP 401.
+The web UI accepts a short-lived Codex access token and an optional account identifier at runtime. These values are stored in NVS and sent to the configured usage service. The firmware does not store refresh tokens or perform an OAuth refresh. Treat every access token as an account credential and replace or revoke it if the device or network may have been compromised.
 
-This direct route is **undocumented and unsupported** and may stop working. As an alternative, configure a trusted HTTPS adapter URL that returns:
+The direct route is **undocumented and unsupported** and may stop working. A custom HTTPS adapter can return:
 
 ```json
 {
@@ -105,7 +100,7 @@ This direct route is **undocumented and unsupported** and may stop working. As a
 }
 ```
 
-The adapter URL and optional bearer token are runtime-only NVS values.
+Only use an adapter you control and trust. The current implementation may forward stored authorization information to the configured destination.
 
 The Codex section shows the weekly limit plus an optional **Last 30 min** row. The latter is calculated locally from changes to the weekly percentage and displays their total in percentage points, for example `+7.00 PP` when the used weekly value rises from 20% to 27%. The first successful request establishes a `COLLECTING 1/2` baseline; the value appears after the second successful measurement. Six five-minute buckets remain in RAM and are cleared after reboot or a detected weekly reset. The Codex five-hour row remains removed.
 
@@ -113,7 +108,7 @@ The firmware deliberately does not use OpenAI's [organization Usage API](https:/
 
 ### Cursor
 
-Cursor officially documents an [Admin API](https://docs.cursor.com/en/account/teams/admin-api) for team usage. It requires a Team/Enterprise admin API key. For an individual account, this firmware can instead use the session/auth token with `GET https://cursor.com/api/usage-summary`. On Windows, `E:\Cursor_Usage` reads it from `%APPDATA%\Cursor\User\globalStorage\state.vscdb`, table `ItemTable`, key `cursorAuth/accessToken`. The firmware accepts either that raw JWT or an existing `sub::JWT`/`WorkosCursorSessionToken` value. This endpoint and cookie flow are **undocumented and unsupported by Cursor** and may change without notice. The token is stored only in ESP32 NVS.
+Cursor officially documents an [Admin API](https://docs.cursor.com/en/account/teams/admin-api) for Team and Enterprise administration. Personal usage support in this firmware relies on an undocumented session-based endpoint that may change without notice. The required runtime token is stored in ESP32 NVS; treat it as an account credential and revoke it if the device or network may have been compromised.
 
 For **Last 30 min**, the firmware also reads the personal dashboard's undocumented `POST /api/dashboard/get-filtered-usage-events` route. It processes timestamp, model, call kind/Max Mode, input/output/cache-read/cache-write tokens, and cost when present. Results include total tokens, calls, token split, cost, top model, and six 5-minute buckets. Pages are read in groups of 50 and capped at 500 events; reaching the cap or losing a later page marks the result as partial. If only some events expose tokens, a `+` is shown after the token total; if none do, the six bars fall back to call counts. The web UI states the token coverage explicitly.
 
@@ -133,12 +128,16 @@ Limit status always uses the consumed percentage in both display modes. Its prio
 
 ## Security notes
 
-- `.gitignore` excludes the local `platformio.ini`, common secret files, and build output. `platformio.ini.example` contains placeholders only. There are no credentials or tokens in this repository.
-- The web portal is HTTP on the local LAN. Use a trusted home/office network; the setup AP is intended only for initial provisioning.
-- Provider traffic requires an `https://` URL. The current small-device client encrypts transport but does not yet pin/validate a CA certificate (`setInsecure()`); this limitation is explicit in `HttpJson.cpp`. Do not expose the device to an untrusted network.
-- Diagnostics expose booleans such as `codex_configured`, never credential values.
-- Codex and Cursor access tokens grant account access. Never share them, commit them, or paste them into serial logs.
-- For production hardening, enable ESP32 NVS encryption and Secure Boot/Flash Encryption during provisioning.
+- The currently tracked tree contains no known provider token. `.gitignore` excludes local configuration, common secret files, and build output. Git history must be reviewed separately before publishing a previously private repository.
+- The HTTP web portal has no authentication. Every device on the same network can access diagnostics, change settings, replace provider URLs, reconfigure Wi-Fi, and submit OTA firmware.
+- The setup/recovery access point currently has no WPA password. Use it only in a controlled location and disable or secure it before deploying the device elsewhere.
+- Provider traffic requires `https://`, but the client currently calls `setInsecure()` and does not validate the server certificate. Encryption without certificate verification does not prevent an active network attacker from impersonating the destination.
+- Custom provider URLs are security-sensitive: stored authorization or session information may be sent to the configured host. Use only fixed, trusted destinations.
+- Wi-Fi passwords, provider tokens, and account identifiers are stored in NVS without application-level encryption. Physical flash access can expose them unless platform security features are enabled.
+- OTA images are not authenticated by this application. Because the OTA endpoint is also unauthenticated, a network participant can replace the firmware with another valid ESP32 image.
+- There is no CSRF or Origin protection. Do not browse untrusted sites while the device portal is reachable from the same browser/network.
+- Diagnostics do not intentionally return raw credential values, but they expose operational and usage information. `/api/screenshot` exposes the complete current display.
+- For production deployment, add portal authentication, signed OTA verification, certificate validation, a protected setup AP, NVS encryption, Secure Boot, and Flash Encryption.
 
 ## Build
 
@@ -155,8 +154,8 @@ Tested with PlatformIO `espressif32@6.12.0`, Arduino-ESP32 2.0.17, Arduino_GFX 1
 | `/` | GET | Configuration and OTA UI |
 | `/api/health` | GET | Minimal liveness response |
 | `/api/status` | GET | Redacted runtime/debug status |
-| `/api/usage` | GET | Current sanitized provider limits and 30-minute buckets; never credentials |
-| `/api/touch` | GET | Live I²C, GT911, coordinate, and gesture diagnostics; never credentials |
+| `/api/usage` | GET | Current sanitized provider limits and 30-minute buckets; does not intentionally include stored secrets |
+| `/api/touch` | GET | Live I²C, GT911, coordinate, and gesture diagnostics; does not intentionally include stored secrets |
 | `/api/config` | POST | Save settings to NVS and restart |
 | `/api/wifi/scan` | GET | Scan nearby Wi-Fi networks |
 | `/api/wifi` | POST | Save selected Wi-Fi credentials and restart |
@@ -165,5 +164,5 @@ Tested with PlatformIO `espressif32@6.12.0`, Arduino-ESP32 2.0.17, Arduino_GFX 1
 
 ## License
 
-MIT. Hardware pin/timing attribution is retained above; no EspControl/ESPHome source code is included.
+MIT.
 

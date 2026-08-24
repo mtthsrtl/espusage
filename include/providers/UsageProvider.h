@@ -6,6 +6,7 @@ struct UsageWindow {
   String label;
   float usedPercent = -1;
   float elapsedPercent = -1;
+  uint32_t windowSeconds = 0;
   bool monetary = false;
   float usedAmount = -1;
   float limitAmount = -1;
@@ -43,6 +44,7 @@ struct RecentUsage30m {
 
 struct UsageSnapshot {
   String provider; bool ok = false; String status; String plan; String updated;
+  uint32_t receivedAtMs = 0;
   UsageWindow primary; UsageWindow secondary; UsageWindow tertiary; float credits = -1;
   RecentUsage30m recent30m;
 };

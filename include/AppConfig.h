@@ -22,6 +22,9 @@ struct AppConfig {
   uint8_t criticalPercent = 90;
   uint32_t overpaceColor = 0xDDF542;
   uint32_t warningColor = 0xF0A020;
+  uint32_t backgroundColor = 0x000000;
+  uint32_t paceIndicatorColor = 0xFFFFFF;
+  bool paceIndicatorGlow = false;
   bool verifyTls = true;
   uint8_t displayStyle = 0;  // 0 = framed panels, 1 = open/frameless
   bool displayAvailable = false;

@@ -25,6 +25,9 @@ bool loadConfig(AppConfig &c) {
   c.criticalPercent = prefs.getUChar("crit_pct", 90);
   c.overpaceColor = prefs.getUInt("over_color", 0xDDF542) & 0xFFFFFF;
   c.warningColor = prefs.getUInt("warn_color", 0xF0A020) & 0xFFFFFF;
+  c.backgroundColor = prefs.getUInt("bg_color", 0x000000) & 0xFFFFFF;
+  c.paceIndicatorColor = prefs.getUInt("pace_color", 0xFFFFFF) & 0xFFFFFF;
+  c.paceIndicatorGlow = prefs.getBool("pace_glow", false);
   c.verifyTls = prefs.getBool("tls", true);
   c.displayStyle = prefs.getUChar("ui_style", 0);
   if (c.displayStyle > 1) c.displayStyle = 0;
@@ -65,6 +68,9 @@ bool saveConfig(const AppConfig &c) {
   prefs.putUChar("bright", c.brightness); prefs.putUShort("refresh", c.refreshMinutes);
   prefs.putUChar("warn_pct", c.warningPercent); prefs.putUChar("crit_pct", c.criticalPercent);
   prefs.putUInt("over_color", c.overpaceColor & 0xFFFFFF); prefs.putUInt("warn_color", c.warningColor & 0xFFFFFF);
+  prefs.putUInt("bg_color", c.backgroundColor & 0xFFFFFF);
+  prefs.putUInt("pace_color", c.paceIndicatorColor & 0xFFFFFF);
+  prefs.putBool("pace_glow", c.paceIndicatorGlow);
   prefs.putBool("tls", c.verifyTls);
   prefs.putUChar("ui_style", c.displayStyle);
   prefs.putBool("ui_remaining", c.displayAvailable);
