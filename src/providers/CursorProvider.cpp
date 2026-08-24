@@ -48,6 +48,10 @@ static float elapsedPercent(const char *startIso, const char *endIso) {
   float elapsed=100.0f*(float)(now-start)/(float)(end-start);
   return constrain(elapsed,0.0f,100.0f);
 }
+static uint32_t periodSeconds(const char *startIso, const char *endIso) {
+  time_t start=parseIsoUtc(startIso),end=parseIsoUtc(endIso);
+  return start>0&&end>start?(uint32_t)(end-start):0;
+}
 static float onDemandPercent(JsonVariant bucket) {
   if(bucket.isNull())return -1.0f;
   bool enabled=bucket["enabled"]|false;
@@ -225,9 +229,11 @@ UsageSnapshot CursorProvider::fetch(const ProviderConfig &cfg, bool tls) {
   } else addOnDemandAmounts(individualDemand,out.tertiary);
   if(demandUsed<0)demandUsed=0.0f;
   String reset=remainingText(d["billingCycleEnd"]|"");
-  float elapsed=elapsedPercent(d["billingCycleStart"]|"",d["billingCycleEnd"]|"");
+  const char *cycleStart=d["billingCycleStart"]|"",*cycleEnd=d["billingCycleEnd"]|"";
+  float elapsed=elapsedPercent(cycleStart,cycleEnd); uint32_t windowSeconds=periodSeconds(cycleStart,cycleEnd);
   out.primary.usedPercent=autoUsed; out.secondary.usedPercent=apiUsed; out.tertiary.usedPercent=demandUsed;
   out.primary.elapsedPercent=elapsed; out.secondary.elapsedPercent=elapsed; out.tertiary.elapsedPercent=elapsed;
+  out.primary.windowSeconds=windowSeconds; out.secondary.windowSeconds=windowSeconds; out.tertiary.windowSeconds=windowSeconds;
   out.primary.resetText=reset; out.secondary.resetText=reset; out.tertiary.resetText=reset;
   out.plan=String((const char*)(d["membershipType"]|"")); out.ok=out.primary.usedPercent>=0||out.secondary.usedPercent>=0;
   out.status=out.ok?"online (unofficial)":"usage fields missing";

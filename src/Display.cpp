@@ -38,7 +38,7 @@ static uint32_t touchDownEvents = 0, touchUpEvents = 0, touchTapEvents = 0, touc
 static uint32_t touchLastCallbackMs = 0, touchFallbackReads = 0;
 static lv_indev_t *touchInputDevice = nullptr;
 
-static lv_obj_t *networkLabel, *modeLabel, *providerStatusLabels[2];
+static lv_obj_t *networkLabel, *modeLabel, *providerStatusLabels[2], *providerPlanLabels[2];
 static lv_obj_t *statusLabels[4], *values[4], *bars[4], *paceMarkers[4], *resetLabels[4], *rows[4];
 static lv_obj_t *paceRows[2], *paceValues[2], *paceMeta[2], *paceColumns[2][6];
 static int barWidths[4], markerY[4], paceChartBaseline[2], paceChartMaxHeight[2];
@@ -49,6 +49,8 @@ static UsageSnapshot latestCodex, latestCursor;
 static bool availableView = false;
 static uint8_t warningLevel = 70, criticalLevel = 90;
 static uint32_t overpaceColor = 0xDDF542, warningColor = 0xF0A020;
+static uint32_t paceIndicatorColor = 0xFFFFFF;
+static bool paceIndicatorGlow = false;
 
 static lv_color_t C(uint32_t value) { return lv_color_hex(value); }
 
@@ -71,9 +73,8 @@ static bool touchReadRegister(uint16_t reg, uint8_t *data, size_t length) {
   Wire.beginTransmission(touchAddress);
   Wire.write((uint8_t)(reg >> 8));
   Wire.write((uint8_t)(reg & 0xFF));
-  // ESPHome's working GT911 driver finishes the register-pointer write before
-  // starting the read. Some 4848S040 revisions do not answer reliably to the
-  // repeated-start transaction previously used here.
+  // Finish the register-pointer write before starting the read. Some board
+  // revisions do not answer reliably to a repeated-start transaction.
   if (Wire.endTransmission(true) != 0) return false;
   if (Wire.requestFrom(touchAddress, (uint8_t)length, (uint8_t)true) != length) return false;
   for (size_t i = 0; i < length; ++i) data[i] = Wire.read();
@@ -134,12 +135,12 @@ static bool touchProbe() {
 }
 
 static void touchBegin() {
-  // EspControl leaves reset/interrupt unassigned on the 4848S040. GPIO41/42
-  // are SD-card pins on this board and must never be toggled for touch setup.
+  // Reset/interrupt remain unassigned. GPIO41/42 are SD-card pins on this
+  // board and must never be toggled for touch setup.
   pinMode(TOUCH_SDA, INPUT_PULLUP);
   pinMode(TOUCH_SCL, INPUT_PULLUP);
   Wire.begin(TOUCH_SDA, TOUCH_SCL);
-  Wire.setClock(50000);  // EspControl/ESPHome default for this exact board.
+  Wire.setClock(50000);
   Wire.setTimeOut(50);
   touchLastProbeMs = millis();
   touchScanBus();
@@ -175,8 +176,7 @@ static void readTouch(lv_indev_drv_t *, lv_indev_data_t *data) {
       touchLastState = state; touchLastCount = count;
       if (state & 0x80) {
         touchReadyFrames++;
-        // Match the proven ESPHome GT911 sequence used by EspControl: clear
-        // the ready flag immediately, then fetch the current point buffer.
+        // Clear the ready flag immediately, then fetch the current point buffer.
         if (!touchWriteRegister(GT911_TOUCH_STATE, 0)) {
           touchAcknowledgeErrors++;
           touchLastError = "GT911 frame acknowledgement failed";
@@ -191,8 +191,8 @@ static void readTouch(lv_indev_drv_t *, lv_indev_data_t *data) {
             uint16_t rawY = (uint16_t)points[3] | ((uint16_t)points[4] << 8);
             touchRawX = rawX; touchRawY = rawY; touchPointFrames++;
             touchLastError = "none";
-            // EspControl uses mirror_x/y=false and LVGL rotation=180. Our LVGL
-            // framebuffer is unrotated, so apply that single 180° transform here.
+            // The framebuffer is unrotated, so apply the panel's 180° touch
+            // coordinate transform here.
             touchX = constrain(479 - (int)rawX, 0, 479);
             touchY = constrain(479 - (int)rawY, 0, 479);
             touchPressed = true;
@@ -253,6 +253,13 @@ static String formatTokens(uint64_t value) {
   return formatUnsigned(value);
 }
 
+static String formatPlanBadge(String plan) {
+  plan.trim(); plan.toUpperCase(); plan.replace("_", " "); plan.replace("-", " ");
+  if (plan == "PRO PLUS" || plan == "PROPLUS") return "PRO+";
+  if (plan.length() > 12) plan = plan.substring(0, 12);
+  return plan;
+}
+
 enum class UsageLevel : uint8_t { NoData, Ok, Overpace, Warning, Critical };
 
 static UsageLevel usageLevel(const UsageWindow &window) {
@@ -277,6 +284,16 @@ static const char *usageState(UsageLevel level) {
   if (level == UsageLevel::Overpace) return "OVERPACE";
   if (level == UsageLevel::Ok) return "OK";
   return "NO DATA";
+}
+
+static String paceWaitText(const UsageWindow &window) {
+  if (!window.windowSeconds || window.usedPercent < 0 || window.elapsedPercent < 0 ||
+      window.usedPercent <= window.elapsedPercent) return "";
+  uint32_t seconds = (uint32_t)(((window.usedPercent - window.elapsedPercent) * window.windowSeconds / 100.0f) + 0.5f);
+  uint32_t days = seconds / 86400; seconds %= 86400;
+  uint32_t hours = seconds / 3600, minutes = (seconds % 3600) / 60;
+  if (days) return "pace in " + String(days) + "d " + String(hours) + "h";
+  return "pace in " + String(hours) + "h " + String(minutes) + "m";
 }
 
 static uint8_t validBucketCount(const RecentUsage30m &recent) {
@@ -399,6 +416,8 @@ static void renderMetric(uint8_t index) {
   } else lv_obj_add_flag(paceMarkers[index], LV_OBJ_FLAG_HIDDEN);
 
   String bottom = window.resetText.length() ? window.resetText : rowStatus[index];
+  String paceWait = paceWaitText(window);
+  if (level != UsageLevel::Ok && level != UsageLevel::NoData && paceWait.length()) bottom += " - " + paceWait;
   if (used < 0 && networkAddress.length() && (rowStatus[index] == "disabled" || rowStatus[index].indexOf("missing") >= 0))
     bottom = "Setup: http://" + networkAddress;
   lv_label_set_text(resetLabels[index], bottom.c_str());
@@ -484,7 +503,11 @@ static void makeUsageRow(lv_obj_t *parent, uint8_t index, int x, int y, int widt
   lv_obj_clear_flag(bars[index], LV_OBJ_FLAG_CLICKABLE);
   barWidths[index] = width; markerY[index] = 17;
   paceMarkers[index] = lv_obj_create(row); lv_obj_set_size(paceMarkers[index], 3, 11); lv_obj_set_pos(paceMarkers[index], 0, markerY[index]);
-  lv_obj_set_style_bg_color(paceMarkers[index], C(0xFFFFFF), 0); lv_obj_set_style_bg_opa(paceMarkers[index], LV_OPA_COVER, 0);
+  lv_obj_set_style_bg_color(paceMarkers[index], C(paceIndicatorColor), 0); lv_obj_set_style_bg_opa(paceMarkers[index], LV_OPA_COVER, 0);
+  lv_obj_set_style_shadow_color(paceMarkers[index], C(paceIndicatorColor), 0);
+  lv_obj_set_style_shadow_width(paceMarkers[index], paceIndicatorGlow ? 8 : 0, 0);
+  lv_obj_set_style_shadow_spread(paceMarkers[index], paceIndicatorGlow ? 2 : 0, 0);
+  lv_obj_set_style_shadow_opa(paceMarkers[index], paceIndicatorGlow ? LV_OPA_70 : LV_OPA_TRANSP, 0);
   lv_obj_set_style_border_width(paceMarkers[index], 0, 0); lv_obj_set_style_radius(paceMarkers[index], 1, 0); lv_obj_set_style_pad_all(paceMarkers[index], 0, 0);
   lv_obj_clear_flag(paceMarkers[index], LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE); lv_obj_add_flag(paceMarkers[index], LV_OBJ_FLAG_HIDDEN);
   resetLabels[index] = label(row, "Waiting for usage data", &lv_font_montserrat_12, C(0x929292));
@@ -537,6 +560,12 @@ static lv_obj_t *makeProviderPanel(const char *title, uint8_t provider, int y, i
     lv_obj_set_style_img_recolor_opa(providerIcon, 180, 0);
   }
   lv_obj_t *heading = label(panel, title, &lv_font_montserrat_20, C(0xFFFFFF)); lv_obj_set_pos(heading, innerX + 25, 2);
+  providerPlanLabels[provider] = label(panel, "", &lv_font_montserrat_12, C(0xD7FBEF));
+  lv_obj_set_pos(providerPlanLabels[provider], innerX + 25 + (provider == 0 ? 98 : 84), 3);
+  lv_obj_set_style_bg_color(providerPlanLabels[provider], C(0x173D33), 0); lv_obj_set_style_bg_opa(providerPlanLabels[provider], LV_OPA_COVER, 0);
+  lv_obj_set_style_pad_left(providerPlanLabels[provider], 6, 0); lv_obj_set_style_pad_right(providerPlanLabels[provider], 6, 0);
+  lv_obj_set_style_pad_top(providerPlanLabels[provider], 3, 0); lv_obj_set_style_pad_bottom(providerPlanLabels[provider], 3, 0);
+  lv_obj_set_style_radius(providerPlanLabels[provider], 8, 0); lv_obj_add_flag(providerPlanLabels[provider], LV_OBJ_FLAG_HIDDEN);
   providerStatusLabels[provider] = label(panel, "WAITING", &lv_font_montserrat_12, C(0x888888)); lv_obj_align(providerStatusLabels[provider], LV_ALIGN_TOP_RIGHT, -innerX, 6);
   lv_obj_t *divider = lv_obj_create(panel); lv_obj_set_size(divider, innerWidth, 1); lv_obj_set_pos(divider, innerX, 28);
   lv_obj_set_style_bg_color(divider, C(0x3A3A3A), 0); lv_obj_set_style_bg_opa(divider, LV_OPA_COVER, 0); lv_obj_set_style_border_width(divider, 0, 0); lv_obj_set_style_pad_all(divider, 0, 0);
@@ -548,6 +577,8 @@ void displayBegin(const AppConfig &config) {
   availableView = config.displayAvailable;
   overpaceColor = config.overpaceColor;
   warningColor = config.warningColor;
+  paceIndicatorColor = config.paceIndicatorColor;
+  paceIndicatorGlow = config.paceIndicatorGlow;
   // Bring up the board's independent GT911 bus before the RGB peripheral.
   // This also gives a useful boot-time probe even if LVGL never sees a press.
   touchBegin();
@@ -562,7 +593,7 @@ void displayBegin(const AppConfig &config) {
   touchLastCallbackMs = millis();
   Serial.printf("[touch][lvgl] Input device registration: %s\n", touchInputDevice ? "ready" : "FAILED");
 
-  lv_obj_set_style_bg_color(lv_scr_act(), C(0x000000), 0); lv_obj_set_style_bg_opa(lv_scr_act(), LV_OPA_COVER, 0);
+  lv_obj_set_style_bg_color(lv_scr_act(), C(config.backgroundColor), 0); lv_obj_set_style_bg_opa(lv_scr_act(), LV_OPA_COVER, 0);
   lv_obj_add_flag(lv_scr_act(), LV_OBJ_FLAG_CLICKABLE);
   lv_obj_t *title = label(lv_scr_act(), "AI USAGE", &lv_font_montserrat_20, C(0xFFFFFF)); lv_obj_set_pos(title, 16, 5);
   modeLabel = label(lv_scr_act(), "USED", &lv_font_montserrat_12, C(0xFFFFFF)); lv_obj_align(modeLabel, LV_ALIGN_TOP_MID, 0, 11);
@@ -707,6 +738,15 @@ void displayUpdate(const UsageSnapshot &codex, const UsageSnapshot &cursor, uint
   if (providerStatusLabels[0]) {
     lv_label_set_text(providerStatusLabels[0], cursor.ok ? "ONLINE" : cursor.status == "disabled" ? "DISABLED" : "NO DATA");
     lv_obj_set_style_text_color(providerStatusLabels[0], C(cursor.ok ? 0x45D597 : 0x888888), 0);
+  }
+  String cursorPlan = formatPlanBadge(cursor.plan), codexPlan = formatPlanBadge(codex.plan);
+  if (providerPlanLabels[0]) {
+    lv_label_set_text(providerPlanLabels[0], cursorPlan.c_str());
+    if (cursorPlan.length()) lv_obj_clear_flag(providerPlanLabels[0], LV_OBJ_FLAG_HIDDEN); else lv_obj_add_flag(providerPlanLabels[0], LV_OBJ_FLAG_HIDDEN);
+  }
+  if (providerPlanLabels[1]) {
+    lv_label_set_text(providerPlanLabels[1], codexPlan.c_str());
+    if (codexPlan.length()) lv_obj_clear_flag(providerPlanLabels[1], LV_OBJ_FLAG_HIDDEN); else lv_obj_add_flag(providerPlanLabels[1], LV_OBJ_FLAG_HIDDEN);
   }
   if (providerStatusLabels[1]) {
     lv_label_set_text(providerStatusLabels[1], codex.ok ? "ONLINE" : codex.status == "disabled" ? "DISABLED" : "NO DATA");

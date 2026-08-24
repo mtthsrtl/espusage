@@ -27,9 +27,8 @@ static void ensureCleanPeripheralBoot() {
   Serial.printf("[boot] Reset reason: %d\n", (int)reason);
   if (reason != ESP_RST_SW) return;
 
-  // EspControl applies this workaround on the same 4848S040 hardware. After
-  // an OTA/configuration ESP.restart(), the S3 RGB/touch peripherals can retain
-  // an unusable state. A short deep sleep produces the required hardware reset;
+  // After an OTA/configuration ESP.restart(), the S3 RGB/touch peripherals can
+  // retain an unusable state. A short deep sleep produces the required hardware reset;
   // the following boot reports ESP_RST_DEEPSLEEP and continues normally.
   Serial.println("[boot] Software reset detected; forcing clean peripheral reset");
   Serial.flush();

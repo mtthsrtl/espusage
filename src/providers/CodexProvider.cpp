@@ -18,6 +18,7 @@ static void readWindow(JsonVariant source, UsageWindow &target) {
   uint32_t resetAt=source["reset_at"]|0;
   time_t now=time(nullptr);
   if(!remaining&&resetAt&&now>1700000000&&resetAt>(uint32_t)now)remaining=resetAt-(uint32_t)now;
+  target.windowSeconds=windowSeconds;
   if(windowSeconds&&remaining<=windowSeconds)target.elapsedPercent=constrain(100.0f-(100.0f*remaining/windowSeconds),0.0f,100.0f);
 }
 
@@ -39,8 +40,8 @@ UsageSnapshot CodexProvider::fetch(const ProviderConfig &cfg, bool tls) {
   }
   JsonVariant primary=d["primary"];
   JsonVariant weekly=d["weekly"];if(weekly.isNull())weekly=d["secondary"];
-  out.primary.usedPercent=primary["used_percent"] | -1.0f;out.primary.elapsedPercent=primary["elapsed_percent"] | -1.0f;out.primary.resetText=String((const char*)(primary["reset_text"] | ""));
-  out.secondary.usedPercent=weekly["used_percent"] | -1.0f;out.secondary.elapsedPercent=weekly["elapsed_percent"] | -1.0f;out.secondary.resetText=String((const char*)(weekly["reset_text"] | ""));
+  out.primary.usedPercent=primary["used_percent"] | -1.0f;out.primary.elapsedPercent=primary["elapsed_percent"] | -1.0f;out.primary.windowSeconds=primary["window_seconds"] | 0;out.primary.resetText=String((const char*)(primary["reset_text"] | ""));
+  out.secondary.usedPercent=weekly["used_percent"] | -1.0f;out.secondary.elapsedPercent=weekly["elapsed_percent"] | -1.0f;out.secondary.windowSeconds=weekly["window_seconds"] | 0;out.secondary.resetText=String((const char*)(weekly["reset_text"] | ""));
   if(out.secondary.usedPercent<0){out.secondary=out.primary;out.primary.usedPercent=-1;out.primary.resetText="";}
   out.credits=d["credits"] | -1.0f;out.plan=String((const char*)(d["plan"] | ""));
   out.ok=out.primary.usedPercent>=0||out.secondary.usedPercent>=0;out.status=out.ok?"online (adapter)":"missing fields";return out;
