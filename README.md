@@ -1,5 +1,6 @@
 # ESP Usage for GUITION 4848S040
 <img width="480" height="480" alt="espusage-live" src="https://github.com/user-attachments/assets/ca8c95d5-a0c0-4de5-bcc7-3e0b656a0437" />
+
 Native, standalone firmware for the 4-inch GUITION ESP32-S3 4848S040 (480×480). It replaces ESPHome/EspControl and provides a touch-first dark usage dashboard, local configuration portal, NVS persistence, modular HTTPS providers, OTA updates, and diagnostics.
 
 
