@@ -694,6 +694,10 @@ TouchDiagnostics displayGetTouchDiagnostics() {
   return diagnostics;
 }
 
+const uint16_t *displayGetFramebuffer() {
+  return gfx ? gfx->getFramebuffer() : nullptr;
+}
+
 void displayUpdate(const UsageSnapshot &codex, const UsageSnapshot &cursor, uint8_t warningPercent, uint8_t criticalPercent) {
   latestCodex = codex; latestCursor = cursor; warningLevel = warningPercent; criticalLevel = criticalPercent;
   rowData[0] = cursor.primary; rowData[1] = cursor.secondary; rowData[2] = cursor.tertiary;

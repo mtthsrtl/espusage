@@ -12,6 +12,74 @@ static UsageSnapshot latestCodex;
 static UsageSnapshot latestCursor;
 static bool hasUsageSnapshot = false;
 
+static bool hasArgValue(const String &name, const String &value) {
+  for (uint8_t i = 0; i < server.args(); ++i)
+    if (server.argName(i) == name && server.arg(i) == value) return true;
+  return false;
+}
+
+static void writeBigEndian32(uint32_t value, uint8_t *out) {
+  out[0] = value >> 24; out[1] = value >> 16; out[2] = value >> 8; out[3] = value;
+}
+
+static uint32_t pngCrcUpdate(uint32_t crc, const uint8_t *data, size_t length) {
+  while (length--) {
+    crc ^= *data++;
+    for (uint8_t bit = 0; bit < 8; ++bit) crc = (crc >> 1) ^ (0xEDB88320UL & (0U - (crc & 1U)));
+  }
+  return crc;
+}
+
+static void sendDisplayScreenshot() {
+  const uint16_t *framebuffer = displayGetFramebuffer();
+  if (!framebuffer) { server.send(503, "text/plain", "Display framebuffer unavailable."); return; }
+  constexpr uint16_t width = 480, height = 480;
+  constexpr uint32_t rowSize = 1 + width * 3;
+  constexpr uint32_t rawSize = rowSize * height;
+  constexpr uint32_t blockCount = (rawSize + 65534) / 65535;
+  constexpr uint32_t idatSize = 2 + blockCount * 5 + rawSize + 4;
+  constexpr uint32_t fileSize = 8 + 12 + 13 + 12 + idatSize + 12;
+  server.sendHeader("Content-Disposition", "attachment; filename=espusage-live.png");
+  server.sendHeader("Cache-Control", "no-store");
+  server.setContentLength(fileSize); server.send(200, "image/png", "");
+  WiFiClient client = server.client();
+  const uint8_t signature[8] = {137,80,78,71,13,10,26,10}; client.write(signature, 8);
+  uint8_t ihdr[25] = {}; writeBigEndian32(13, ihdr); memcpy(ihdr + 4, "IHDR", 4);
+  writeBigEndian32(width, ihdr + 8); writeBigEndian32(height, ihdr + 12); ihdr[16] = 8; ihdr[17] = 2;
+  uint32_t ihdrCrc = pngCrcUpdate(0xFFFFFFFF, ihdr + 4, 17) ^ 0xFFFFFFFF; writeBigEndian32(ihdrCrc, ihdr + 21); client.write(ihdr, 25);
+  uint8_t idatHeader[8]; writeBigEndian32(idatSize, idatHeader); memcpy(idatHeader + 4, "IDAT", 4); client.write(idatHeader, 8);
+  uint32_t crc = pngCrcUpdate(0xFFFFFFFF, idatHeader + 4, 4), adlerA = 1, adlerB = 0;
+  const uint8_t zlibHeader[2] = {0x78,0x01}; client.write(zlibHeader, 2); crc = pngCrcUpdate(crc, zlibHeader, 2);
+  uint8_t output[1024]; uint32_t rawOffset = 0;
+  while (rawOffset < rawSize && client.connected()) {
+    uint16_t blockLength = min((uint32_t)65535, rawSize - rawOffset);
+    uint8_t blockHeader[5] = {uint8_t(rawOffset + blockLength == rawSize), uint8_t(blockLength), uint8_t(blockLength >> 8), uint8_t(~blockLength), uint8_t((~blockLength) >> 8)};
+    client.write(blockHeader, 5); crc = pngCrcUpdate(crc, blockHeader, 5);
+    uint32_t blockRemaining = blockLength;
+    while (blockRemaining && client.connected()) {
+      size_t count = min((uint32_t)sizeof(output), blockRemaining);
+      for (size_t i = 0; i < count; ++i) {
+        uint32_t position = rawOffset + i, column = position % rowSize;
+        uint8_t value = 0;
+        if (column) {
+          uint32_t y = position / rowSize, component = column - 1, x = component / 3;
+          uint16_t pixel = framebuffer[y * width + x];
+          switch (component % 3) {
+            case 0: value = ((pixel >> 11) & 0x1F) * 255 / 31; break;
+            case 1: value = ((pixel >> 5) & 0x3F) * 255 / 63; break;
+            default: value = (pixel & 0x1F) * 255 / 31;
+          }
+        }
+        output[i] = value; adlerA = (adlerA + value) % 65521; adlerB = (adlerB + adlerA) % 65521;
+      }
+      client.write(output, count); crc = pngCrcUpdate(crc, output, count); rawOffset += count; blockRemaining -= count;
+    }
+  }
+  uint8_t trailer[16]; writeBigEndian32((adlerB << 16) | adlerA, trailer); client.write(trailer, 4); crc = pngCrcUpdate(crc, trailer, 4) ^ 0xFFFFFFFF;
+  writeBigEndian32(crc, trailer); client.write(trailer, 4); writeBigEndian32(0, trailer); memcpy(trailer + 4, "IEND", 4);
+  uint32_t iendCrc = pngCrcUpdate(0xFFFFFFFF, trailer + 4, 4) ^ 0xFFFFFFFF; writeBigEndian32(iendCrc, trailer + 8); client.write(trailer, 12);
+}
+
 static String formatClockMinutes(uint16_t minutes) {
   char value[6];
   snprintf(value, sizeof(value), "%02u:%02u", minutes / 60, minutes % 60);
@@ -63,8 +131,8 @@ static const char CONFIG_SUCCESS_PAGE[] PROGMEM = R"HTML(
 static const char PAGE[] PROGMEM=R"HTML(
 <!doctype html><html><head><meta name=viewport content="width=device-width,initial-scale=1"><title>ESP Usage</title>
 <style>
-  :root{color-scheme:dark}*{box-sizing:border-box}body{font:15px system-ui;background:#090c11;color:#edf2f7;max-width:1120px;margin:30px auto;padding:18px}section{background:#131820;border:1px solid #2a323d;border-radius:16px;padding:20px;margin:14px 0}h1{font-size:26px;margin-bottom:6px}h2{font-size:18px}p{color:#aeb8c4;line-height:1.5}label{display:block;color:#aeb8c4;margin:12px 0 5px}input,select{width:100%;padding:12px;border-radius:9px;border:1px solid #354153;background:#0d1117;color:#fff}input[type=checkbox]{width:auto}button{padding:12px 18px;border:0;border-radius:9px;background:#10a37f;color:#fff;font-weight:700;margin-top:16px;cursor:pointer}button.secondary{background:#263241}button.danger{background:#2a323d;color:#f2b8b5}.row{display:flex;gap:10px;align-items:end}.row>div{flex:1}.grid,.checks,.settings-grid,.utility-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}.settings-grid,.utility-grid{align-items:start}.checks{gap:12px}.checks label{margin:4px 0}.msg{min-height:20px;color:#72d7b5}.warn{color:#f4a62a}.setup .advanced{display:none}.usage-card{background:#0d1117;border:1px solid #2a323d;border-radius:11px;padding:14px}.usage-card h3{margin:0 0 8px}.usage-main{font-size:20px;color:#fff;margin:4px 0}.usage-detail{white-space:pre-line;color:#aeb8c4;line-height:1.55;min-height:92px}.mini{height:36px;display:flex;gap:5px;align-items:end;margin:12px 0 5px}.mini span{display:block;flex:1;min-height:2px;background:#35d078;border-radius:2px 2px 0 0}.usage-card.codex .mini span{background:#8295a8}.partial{color:#f4a62a}.diag{background:#0d1117;border:1px solid #2a323d;border-radius:11px;padding:14px;white-space:pre-wrap;color:#aeb8c4;line-height:1.55;overflow:auto}.ok{color:#72d7b5}.bad{color:#f4a62a}@media(max-width:760px){.grid,.checks,.settings-grid,.utility-grid{display:block}.row{display:block}.usage-card{margin:10px 0}}
-</style></head><body><h1>ESP Usage</h1><p id=intro>Configure the device on your local network.</p>
+  :root{color-scheme:dark}*{box-sizing:border-box}body{font:15px system-ui;background:#090c11;color:#edf2f7;max-width:920px;margin:30px auto;padding:18px}section{background:#131820;border:1px solid #2a323d;border-radius:16px;padding:20px;margin:14px 0}h1{font-size:26px;margin-bottom:6px}h2{font-size:18px}p{color:#aeb8c4;line-height:1.5}label{display:block;color:#aeb8c4;margin:12px 0 5px}input,select{width:100%;padding:12px;border-radius:9px;border:1px solid #354153;background:#0d1117;color:#fff}select[multiple]{min-height:190px;padding:6px}select[multiple] option{padding:9px;border-radius:6px}input[type=checkbox]{width:auto}button,.button{display:inline-block;padding:12px 18px;border:0;border-radius:9px;background:#10a37f;color:#fff;font-weight:700;margin-top:16px;cursor:pointer;text-decoration:none}button.secondary,.button.secondary{background:#263241}button.danger{background:#2a323d;color:#f2b8b5}.row{display:flex;gap:10px;align-items:end}.row>div{flex:1}.grid,.settings-grid,.utility-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}.settings-grid,.utility-grid{align-items:start}.msg{min-height:20px;color:#72d7b5}.warn{color:#f4a62a}.usage-card{background:#0d1117;border:1px solid #2a323d;border-radius:11px;padding:14px}.usage-card h3{margin:0 0 8px}.usage-main{font-size:20px;color:#fff;margin:4px 0}.usage-detail{white-space:pre-line;color:#aeb8c4;line-height:1.55;min-height:92px}.mini{height:36px;display:flex;gap:5px;align-items:end;margin:12px 0 5px}.mini span{display:block;flex:1;min-height:2px;background:#35d078;border-radius:2px 2px 0 0}.usage-card.codex .mini span{background:#8295a8}.partial{color:#f4a62a}.diag{background:#0d1117;border:1px solid #2a323d;border-radius:11px;padding:14px;white-space:pre-wrap;color:#aeb8c4;line-height:1.55;overflow:auto}.ok{color:#72d7b5}.bad{color:#f4a62a}.nav{display:flex;gap:8px;flex-wrap:wrap;margin:20px 0}.nav a{padding:10px 14px;border-radius:9px;background:#171d26;color:#aeb8c4;text-decoration:none}.nav a.active{background:#263241;color:#fff}.switch{display:flex;align-items:center;gap:12px}.switch input{appearance:none;width:46px;height:26px;padding:0;border:0;border-radius:20px;background:#354153;position:relative}.switch input:after{content:'';position:absolute;width:20px;height:20px;left:3px;top:3px;border-radius:50%;background:#fff;transition:.2s}.switch input:checked{background:#10a37f}.switch input:checked:after{transform:translateX(20px)}body:not(.page-wifi)>body,body:not(.page-wifi){}body.page-wifi .advanced,body.page-wifi form{display:none}body.page-general>section,body.page-general .settings-grid>section{display:none}body.page-general .settings-grid>div section{display:block}body.page-general .utility-grid section:first-child{display:none}body.page-display>section,body.page-display .settings-grid>div,body.page-display .utility-grid{display:none}body.page-debug>section,body.page-debug .settings-grid,body.page-debug .utility-grid section:last-child{display:none}body.page-debug .utility-grid section:first-child{display:block}.setup .advanced,.setup form,.setup .nav{display:none}@media(max-width:760px){.grid,.settings-grid,.utility-grid{display:block}.row{display:block}.usage-card{margin:10px 0}}
+</style></head><body><h1>ESP Usage</h1><p id=intro>Configure the device on your local network.</p><nav class=nav><a href=/ data-page=general>General</a><a href=/display data-page=display>Display</a><a href=/wifi data-page=wifi>WiFi</a><a href=/debug data-page=debug>Debug</a></nav><style>.page-general .advanced>section,.page-display .advanced>section{display:none}.page-debug .advanced>section{display:block}.setup>section{display:block!important}</style>
 <section><h2>Settings / WiFi</h2><p>Choose a detected network, enter its password, then save. Credentials are stored only in ESP32 NVS.</p>
 <div class=row><div><label for=networks>Available networks</label><select id=networks><option value="">Scan for networks...</option></select></div><button class=secondary type=button onclick=scan()>Scan again</button></div>
 <label for=manual>SSID (or enter a hidden network)</label><input id=manual maxlength=32 autocomplete=off>
@@ -72,11 +140,12 @@ static const char PAGE[] PROGMEM=R"HTML(
 <button type=button onclick=saveWifi()>Save WiFi &amp; restart</button> <button class=danger type=button onclick=resetWifi()>Delete WiFi configuration</button><p class=msg id=wifiMsg></p></section>
 <div class=advanced><section><h2>Live usage</h2><p>Current provider values and activity for the last 30 minutes. This view contains no access tokens or account identifiers.</p><div class=grid><div class=usage-card><h3>Cursor</h3><div class=usage-main id=cursorMain>Waiting...</div><div class=mini id=cursorChart></div><div class=usage-detail id=cursorDetail></div></div><div class="usage-card codex"><h3>Codex</h3><div class=usage-main id=codexMain>Waiting...</div><div class=mini id=codexChart></div><div class=usage-detail id=codexDetail></div></div></div></section>
   <form method=post action=/api/config><div class=settings-grid><div><section><h2>Codex</h2><p class=warn>Direct Codex limit usage is unofficial and the access token expires.</p><label><input type=checkbox name=codex_on> Enabled</label><label>Codex access_token (empty keeps current)</label><input type=password name=codex_tok autocomplete=new-password><label>ChatGPT account_id, optional (empty keeps current)</label><input type=password name=codex_acct autocomplete=off><label>Custom limit adapter URL (empty uses Codex app token)</label><input name=codex_url></section>
-  <section><h2>Cursor personal</h2><p class=warn>Unofficial read-only dashboard API; may change.</p><label><input type=checkbox name=cursor_on> Enabled</label><label>Usage URL</label><input name=cursor_url value="https://cursor.com/api/usage-summary"><label>Cursor access token (empty keeps current)</label><input type=password name=cursor_tok autocomplete=new-password><p>Read from Cursor's state.vscdb key cursorAuth/accessToken.</p></section></div>
-  <section><h2>Display and status</h2><label>Dashboard design</label><select name=display_style><option value=panels>Panels - framed sections</option><option value=open>Flat - open sections and larger</option></select><label>Displayed values</label><select name=display_mode><option value=used>Used</option><option value=remaining>Remaining</option></select><p>Select which usage rows are visible. The small white line on each limit bar shows how far its reset period has elapsed.</p><div class=checks><label><input type=checkbox name=show_cursor_models> Cursor Models</label><label><input type=checkbox name=show_cursor_other> Other Models</label><label><input type=checkbox name=show_cursor_ondemand> On Demand</label><label><input type=checkbox name=show_cursor_30m> Cursor 30 minutes</label><label><input type=checkbox name=show_codex_weekly> Codex weekly limit</label><label><input type=checkbox name=show_codex_30m> Codex 30 minutes</label></div><label><input type=checkbox name=display_off_enabled> Display Off Time enabled</label><div class=row><div><label>Display off from</label><input name=display_off_from type=time value="22:00"></div><div><label>Display off until</label><input name=display_off_until type=time value="07:00"></div></div><p>Uses Europe/Berlin local time. During this window, touch wakes the display for one minute.</p><label>Hostname</label><input name=host value=espusage><label>Brightness %</label><input name=bright type=number min=1 max=100 value=85><label>Refresh minutes</label><input name=refresh type=number min=1 max=1440 value=5><p>Status priority: Critical, Warning, Overpace, OK. Overpace means usage is ahead of the white pace marker; Warning and Critical override it. The same status applies in Used and Remaining mode.</p><div class=row><div><label>Overpace color</label><input name=overpace_color type=color value="#DDF542"></div><div><label>Warning color</label><input name=warning_color type=color value="#F0A020"></div></div><label>Warning from used %</label><input name=warning type=number min=1 max=98 value=70><label>Critical from used %</label><input name=critical type=number min=2 max=100 value=90><button>Save all settings &amp; restart</button></section></div></form>
+  <section><h2>Cursor personal</h2><p class=warn>Unofficial read-only dashboard API; may change.</p><label><input type=checkbox name=cursor_on> Enabled</label><label>Usage URL</label><input name=cursor_url value="https://cursor.com/api/usage-summary"><label>Cursor access token (empty keeps current)</label><input type=password name=cursor_tok autocomplete=new-password><p>Read from Cursor's state.vscdb key cursorAuth/accessToken.</p><button>Save provider settings &amp; restart</button></section></div>
+  <section><h2>Display</h2><p>Choose the dashboard layout and the information shown on the physical display.</p><label>Dashboard design</label><select name=display_style><option value=panels>Panels - framed sections</option><option value=open>Flat - open sections and larger</option></select><label>Displayed values</label><select name=display_mode><option value=used>Used</option><option value=remaining>Remaining</option></select><label for=usageRows>Visible usage rows</label><select id=usageRows name=usage_rows multiple size=6><option value=cursor_models>Cursor Models</option><option value=cursor_other>Other Models</option><option value=cursor_ondemand>On Demand</option><option value=cursor_30m>Cursor 30 minutes</option><option value=codex_weekly>Codex weekly limit</option><option value=codex_30m>Codex 30 minutes</option></select><p>Hold Ctrl/Cmd to select individual rows. The white marker indicates elapsed time in the reset period.</p><h2>Display off schedule</h2><label class=switch><input type=checkbox name=display_off_enabled><span>Display off enabled</span></label><div class=row><div><label>Display off from</label><input name=display_off_from type=time value="22:00"></div><div><label>Display off until</label><input name=display_off_until type=time value="07:00"></div></div><p>Uses Europe/Berlin local time. Touch wakes the display for one minute.</p><h2>Device and refresh</h2><label>Hostname</label><input name=host value=espusage><div class=row><div><label>Brightness %</label><input name=bright type=number min=1 max=100 value=85></div><div><label>Refresh minutes</label><input name=refresh type=number min=1 max=1440 value=5></div></div><h2>Status thresholds</h2><p>Critical overrides Warning, which overrides Overpace.</p><div class=row><div><label>Overpace color</label><input name=overpace_color type=color value="#DDF542"></div><div><label>Warning color</label><input name=warning_color type=color value="#F0A020"></div></div><div class=row><div><label>Warning from used %</label><input name=warning type=number min=1 max=98 value=70></div><div><label>Critical from used %</label><input name=critical type=number min=2 max=100 value=90></div></div><a class="button secondary" href=/api/screenshot>Download live screenshot</a> <button>Save all settings &amp; restart</button></section></div></form>
   <div class=utility-grid><section><h2>Touch diagnostics</h2><p>Live GT911 and I²C data, refreshed every two seconds. Tap the display once and watch whether the counters change.</p><div class=usage-main id=touchMain>Loading...</div><pre class=diag id=touchDetail>Waiting for diagnostics...</pre></section>
   <section><h2>Firmware update</h2><form method=post action=/api/ota enctype=multipart/form-data><input type=file name=firmware accept=.bin><button>Install OTA</button></form></section></div></div>
 <script>
+const page=location.pathname=='/display'?'display':location.pathname=='/wifi'?'wifi':location.pathname=='/debug'?'debug':'general';document.body.classList.add('page-'+page);document.querySelector(`[data-page=${page}]`)?.classList.add('active');
 const q=s=>document.querySelector(s), msg=t=>q('#wifiMsg').textContent=t;
 q('#networks').onchange=()=>{if(q('#networks').value)q('#manual').value=q('#networks').value};
 async function scan(){msg('Scanning...');q('#networks').innerHTML='<option value="">Scanning...</option>';try{let r=await fetch('/api/wifi/scan'),a=await r.json();q('#networks').innerHTML='<option value="">Select a network</option>';a.forEach(n=>{let o=document.createElement('option');o.value=n.ssid;o.textContent=`${n.secure?'🔒 ':' '}${n.ssid} (${n.rssi} dBm)`;q('#networks').append(o)});msg(a.length?`${a.length} network(s) found`:'No networks found; you can enter the SSID manually.')}catch(e){msg('Scan failed. Try again.')}}
@@ -90,8 +159,7 @@ function renderCodex(c){let w=c.secondary||{},r=c.recent_30m||{},valid=(r.bucket
 async function loadUsage(){try{let r=await fetch('/api/usage'),u=await r.json();if(u.ready){renderCursor(u.cursor);renderCodex(u.codex)}}catch(e){q('#cursorMain').textContent=q('#codexMain').textContent='Unavailable'}}
 const hx=n=>'0x'+Number(n||0).toString(16).toUpperCase().padStart(2,'0');
 async function loadTouch(){try{let r=await fetch('/api/touch',{cache:'no-store'}),t=await r.json(),working=t.point_frames>0||t.tap_events>0;q('#touchMain').textContent=t.status;q('#touchMain').className='usage-main '+(working?'ok':'bad');q('#touchDetail').textContent=`Controller: ${t.controller}${t.address?' @ '+hx(t.address):''}\nI2C: SDA ${t.sda}, SCL ${t.scl}, 50 kHz | devices: ${t.bus_devices}\nDisplay: RGB 480 x 480 | pixel clock: 10 MHz\nRaw size: ${t.raw_width} x ${t.raw_height}\nLVGL callbacks: ${t.callback_calls} | fallback reads: ${t.fallback_reads} | GT911 polls: ${t.polls}\nState reads: ${t.state_reads} | errors: ${t.state_read_errors} | last state: ${hx(t.last_state)} | touches: ${t.last_touch_count}\nReady frames: ${t.ready_frames} | point frames: ${t.point_frames} | ACK errors: ${t.ack_errors}\nLast point raw: ${t.raw_x}, ${t.raw_y} | display: ${t.display_x}, ${t.display_y} | pressed: ${t.pressed}\nGestures down/up/tap/toggle: ${t.down_events}/${t.up_events}/${t.tap_events}/${t.toggle_events}\nLast event: ${t.last_event} at ${t.last_event_ms} ms\nLast error: ${t.last_error}\nPossible GSL3680 at 0x40: ${t.possible_gsl3680?'yes':'no'} | view: ${t.remaining_view?'remaining':'used'}`;}catch(e){q('#touchMain').textContent='Touch diagnostics unavailable';q('#touchMain').className='usage-main bad'}}
-  fetch('/api/status').then(r=>r.json()).then(s=>{if(s.setup_mode){document.body.classList.add('setup');q('#intro').textContent='Setup mode: choose your WiFi network to continue.'}else if(s.ssid){q('#manual').value=s.ssid}q('[name=codex_on]').checked=!!s.codex_configured;q('[name=cursor_on]').checked=!!s.cursor_configured;q('[name=codex_url]').value=s.codex_endpoint||'';q('[name=cursor_url]').value=s.cursor_endpoint||'https://cursor.com/api/usage-summary';q('[name=display_style]').value=s.display_style||'panels';q('[name=display_mode]').value=s.display_mode||'used';q('[name=show_cursor_models]').checked=!!s.show_cursor_models;q('[name=show_cursor_other]').checked=!!s.show_cursor_other;q('[name=show_cursor_ondemand]').checked=!!s.show_cursor_ondemand;q('[name=show_cursor_30m]').checked=!!s.show_cursor_30m;q('[name=show_codex_weekly]').checked=!!s.show_codex_weekly;q('[name=show_codex_30m]').checked=!!s.show_codex_30m;q('[name=display_off_enabled]').checked=!!s.display_off_enabled;q('[name=display_off_from]').value=s.display_off_from||'22:00';q('[name=display_off_until]').value=s.display_off_until||'07:00';q('[name=host]').value=s.hostname||'espusage';q('[name=bright]').value=s.brightness||85;q('[name=refresh]').value=s.refresh_minutes||5;q('[name=overpace_color]').value=s.overpace_color||'#DDF542';q('[name=warning_color]').value=s.warning_color||'#F0A020';q('[name=warning]').value=s.warning_percent||70;q('[name=critical]').value=s.critical_percent||90});scan();loadUsage();setInterval(loadUsage,15000);
-loadTouch();setInterval(loadTouch,2000);
+  fetch('/api/status').then(r=>r.json()).then(s=>{if(s.setup_mode){document.body.classList.add('setup');q('#intro').textContent='Setup mode: choose your WiFi network to continue.'}else if(s.ssid){q('#manual').value=s.ssid}q('[name=codex_on]').checked=!!s.codex_configured;q('[name=cursor_on]').checked=!!s.cursor_configured;q('[name=codex_url]').value=s.codex_endpoint||'';q('[name=cursor_url]').value=s.cursor_endpoint||'https://cursor.com/api/usage-summary';q('[name=display_style]').value=s.display_style||'panels';q('[name=display_mode]').value=s.display_mode||'used';let rows={cursor_models:s.show_cursor_models,cursor_other:s.show_cursor_other,cursor_ondemand:s.show_cursor_ondemand,cursor_30m:s.show_cursor_30m,codex_weekly:s.show_codex_weekly,codex_30m:s.show_codex_30m};[...q('#usageRows').options].forEach(o=>o.selected=!!rows[o.value]);q('[name=display_off_enabled]').checked=!!s.display_off_enabled;q('[name=display_off_from]').value=s.display_off_from||'22:00';q('[name=display_off_until]').value=s.display_off_until||'07:00';q('[name=host]').value=s.hostname||'espusage';q('[name=bright]').value=s.brightness||85;q('[name=refresh]').value=s.refresh_minutes||5;q('[name=overpace_color]').value=s.overpace_color||'#DDF542';q('[name=warning_color]').value=s.warning_color||'#F0A020';q('[name=warning]').value=s.warning_percent||70;q('[name=critical]').value=s.critical_percent||90;if(s.setup_mode||page==='wifi')scan();if(page==='debug'){loadUsage();loadTouch();setInterval(loadUsage,15000);setInterval(loadTouch,2000)}}).catch(()=>{q('#intro').textContent='Device status unavailable. Reload the page.'});
 </script></body></html>)HTML";
 
 static void addWindowJson(JsonObject target, const UsageWindow &window) {
@@ -154,6 +222,10 @@ static void restartAfterResponse(const String &message) {
 void webBegin(AppConfig &c, bool setupMode){
  cfg=&c; isSetupMode=setupMode;
  server.on("/",HTTP_GET,[]{server.send_P(200,"text/html",PAGE);});
+ server.on("/display",HTTP_GET,[]{server.send_P(200,"text/html",PAGE);});
+ server.on("/wifi",HTTP_GET,[]{server.send_P(200,"text/html",PAGE);});
+ server.on("/debug",HTTP_GET,[]{server.send_P(200,"text/html",PAGE);});
+ server.on("/api/screenshot",HTTP_GET,[]{sendDisplayScreenshot();});
  server.on("/api/status",HTTP_GET,[]{
    JsonDocument d;
    d["firmware"]="espusage"; d["setup_mode"]=isSetupMode; d["ssid"]=cfg->wifiProvisioned?cfg->wifiSsid:"";
@@ -225,9 +297,9 @@ void webBegin(AppConfig &c, bool setupMode){
    String accountId=server.arg("codex_acct"); accountId.trim(); if(accountId.length())cfg->codex.accountId=accountId;
    cfg->cursor.enabled=server.hasArg("cursor_on"); cfg->cursor.endpoint=server.arg("cursor_url"); String cursorToken=server.arg("cursor_tok"); cursorToken.trim(); if(cursorToken.length())cfg->cursor.token=cursorToken;
    cfg->displayStyle=server.arg("display_style")=="open"?1:0; cfg->displayAvailable=server.arg("display_mode")=="remaining";
-   cfg->showCursorModels=server.hasArg("show_cursor_models"); cfg->showCursorOther=server.hasArg("show_cursor_other");
-   cfg->showCursorOnDemand=server.hasArg("show_cursor_ondemand"); cfg->showCursorThirtyMinute=server.hasArg("show_cursor_30m");
-   cfg->showCodexWeekly=server.hasArg("show_codex_weekly"); cfg->showCodexThirtyMinute=server.hasArg("show_codex_30m");
+   cfg->showCursorModels=hasArgValue("usage_rows","cursor_models"); cfg->showCursorOther=hasArgValue("usage_rows","cursor_other");
+   cfg->showCursorOnDemand=hasArgValue("usage_rows","cursor_ondemand"); cfg->showCursorThirtyMinute=hasArgValue("usage_rows","cursor_30m");
+   cfg->showCodexWeekly=hasArgValue("usage_rows","codex_weekly"); cfg->showCodexThirtyMinute=hasArgValue("usage_rows","codex_30m");
    uint16_t offFrom=cfg->displayOffFromMinutes,offUntil=cfg->displayOffUntilMinutes;
    bool validFrom=parseClockMinutes(server.arg("display_off_from"),offFrom),validUntil=parseClockMinutes(server.arg("display_off_until"),offUntil);
    cfg->displayOffEnabled=server.hasArg("display_off_enabled")&&validFrom&&validUntil&&offFrom!=offUntil;
