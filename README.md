@@ -156,6 +156,8 @@ Tested with PlatformIO `espressif32@6.12.0`, Arduino-ESP32 2.0.17, Arduino_GFX 1
 | `/api/status` | GET | Redacted runtime/debug status |
 | `/api/usage` | GET | Current sanitized provider limits and 30-minute buckets; does not intentionally include stored secrets |
 | `/api/touch` | GET | Live I²C, GT911, coordinate, and gesture diagnostics; does not intentionally include stored secrets |
+| `/api/display?mode=toggle\|used\|remaining` | GET | Change the displayed usage mode |
+| `/api/display/toggle` | GET/POST | Toggle the physical display backlight and return its new state |
 | `/api/config` | POST | Save settings to NVS and restart |
 | `/api/wifi/scan` | GET | Scan nearby Wi-Fi networks |
 | `/api/wifi` | POST | Save selected Wi-Fi credentials and restart |
