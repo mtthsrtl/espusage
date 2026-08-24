@@ -25,9 +25,8 @@ static uint8_t touchReadErrors = 0;
 static bool touchPressed = false;
 static int touchX = 0, touchY = 0;
 static bool touchWasPressed = false, touchPendingToggle = false, touchActivityPending = false;
-static bool touchWakeOnlyGesture = false, displayBacklightOn = true, detailsOpen = false;
+static bool touchWakeOnlyGesture = false, displayBacklightOn = true;
 static uint32_t touchDownMs = 0;
-static int touchDownX = 0, touchDownY = 0;
 static String touchBusDevices = "not scanned", touchLastError = "not initialized", touchLastEvent = "none";
 static bool touchPossibleGsl3680 = false;
 static uint8_t touchLastState = 0, touchLastCount = 0;
@@ -51,8 +50,42 @@ static uint8_t warningLevel = 70, criticalLevel = 90;
 static uint32_t overpaceColor = 0xDDF542, warningColor = 0xF0A020;
 static uint32_t paceIndicatorColor = 0xFFFFFF;
 static bool paceIndicatorGlow = false;
+static uint32_t staleAfterSeconds = 390, lastStatusRefreshMs = 0;
 
 static lv_color_t C(uint32_t value) { return lv_color_hex(value); }
+
+static String dataAge(uint32_t seconds, bool compact) {
+  if (seconds < 60) return String(seconds) + "S";
+  if (seconds < 3600) {
+    uint32_t minutes = seconds / 60;
+    return compact ? String(minutes) + "M" : String(minutes) + "M " + String(seconds % 60) + "S";
+  }
+  uint32_t hours = seconds / 3600, minutes = (seconds % 3600) / 60;
+  return compact ? String(hours) + "H " + String(minutes) + "M"
+                 : String(hours) + "H " + String(minutes) + "M " + String(seconds % 60) + "S";
+}
+
+static void updateProviderStatus(uint8_t provider, const UsageSnapshot &snapshot) {
+  if (!providerStatusLabels[provider]) return;
+  if (!snapshot.ok) {
+    lv_label_set_recolor(providerStatusLabels[provider], false);
+    lv_label_set_text(providerStatusLabels[provider], snapshot.status == "disabled" ? "DISABLED" : "NO DATA");
+    lv_obj_set_style_text_color(providerStatusLabels[provider], C(0x888888), 0);
+    return;
+  }
+  uint32_t ageSeconds = snapshot.receivedAtMs ? (millis() - snapshot.receivedAtMs) / 1000 : 0;
+  bool stale = snapshot.status.startsWith("stale:") || ageSeconds >= staleAfterSeconds;
+  String text = stale
+    ? "#F0A020 STALE · " + dataAge(ageSeconds, true) + "# - #45D597 ONLINE#"
+    : "#777777 " + dataAge(ageSeconds, false) + "# - #45D597 ONLINE#";
+  lv_label_set_recolor(providerStatusLabels[provider], true);
+  lv_label_set_text(providerStatusLabels[provider], text.c_str());
+}
+
+static void updateProviderStatuses() {
+  updateProviderStatus(0, latestCursor);
+  updateProviderStatus(1, latestCodex);
+}
 
 static lv_obj_t *label(lv_obj_t *parent, const char *text, const lv_font_t *font, lv_color_t color) {
   lv_obj_t *object = lv_label_create(parent);
@@ -202,7 +235,7 @@ static void readTouch(lv_indev_drv_t *, lv_indev_data_t *data) {
     }
   }
   if (touchPressed && !touchWasPressed) {
-    touchDownMs = now; touchDownX = touchX; touchDownY = touchY;
+    touchDownMs = now;
     touchActivityPending = true;
     touchWakeOnlyGesture = !displayBacklightOn;
     touchDownEvents++; touchLastEventMs = now; touchLastEvent = "down";
@@ -210,15 +243,13 @@ static void readTouch(lv_indev_drv_t *, lv_indev_data_t *data) {
   }
   if (!touchPressed && touchWasPressed) {
     uint32_t duration = now - touchDownMs;
-    int movement = abs(touchX - touchDownX) + abs(touchY - touchDownY);
-    bool tap = duration >= 35 && duration <= 650 && movement <= 80;
     touchUpEvents++; touchLastEventMs = now; touchLastEvent = "up";
-    if (tap && !detailsOpen && !touchWakeOnlyGesture) {
-      touchPendingToggle = true; touchTapEvents++; touchLastEvent = "tap queued";
+    if (!touchWakeOnlyGesture) {
+      touchPendingToggle = true; touchTapEvents++; touchLastEvent = "toggle queued";
     }
-    Serial.printf("[touch][gesture] up x=%d y=%d, duration=%lums, movement=%d -> %s\n",
-                  touchX, touchY, (unsigned long)duration, movement,
-                  tap ? (touchWakeOnlyGesture ? "wake only" : detailsOpen ? "ignored (details open)" : "toggle queued") : "no tap");
+    Serial.printf("[touch][gesture] up x=%d y=%d, duration=%lums -> %s\n",
+                  touchX, touchY, (unsigned long)duration,
+                  touchWakeOnlyGesture ? "wake only" : "toggle queued");
     touchWakeOnlyGesture = false;
   }
   data->state = touchPressed && !touchWakeOnlyGesture ? LV_INDEV_STATE_PR : LV_INDEV_STATE_REL;
@@ -296,96 +327,6 @@ static String paceWaitText(const UsageWindow &window) {
   return "pace in " + String(hours) + "h " + String(minutes) + "m";
 }
 
-static uint8_t validBucketCount(const RecentUsage30m &recent) {
-  uint8_t count = 0;
-  for (const RecentUsageBucket &bucket : recent.buckets) if (bucket.valid) count++;
-  return count;
-}
-
-static void closeModal(lv_event_t *event) {
-  lv_obj_t *backdrop = (lv_obj_t *)lv_event_get_user_data(event);
-  Serial.println("[touch] Details closed");
-  detailsOpen = false;
-  lv_obj_del(backdrop);
-}
-
-static String standardDetails(uint8_t index) {
-  const UsageWindow &window = rowData[index];
-  String body;
-  if (window.usedPercent < 0) body = "No usage data";
-  else {
-    body = "Used: " + String(window.usedPercent, 1) + "%\nRemaining: " + String(100.0f - window.usedPercent, 1) + "%";
-    if (window.monetary) {
-      body += "\nSpend used: " + window.currencySymbol + String(window.usedAmount, 2);
-      if (window.limitAmount >= 0) {
-        body += "\nSpend remaining: " + window.currencySymbol + String(max(0.0f, window.limitAmount - window.usedAmount), 2);
-        body += "\nSpend limit: " + window.currencySymbol + String(window.limitAmount, 2);
-      }
-    }
-    if (window.elapsedPercent >= 0) {
-      body += "\nPeriod elapsed: " + String(window.elapsedPercent, 1) + "%";
-      body += "\nPeriod remaining: " + String(100.0f - window.elapsedPercent, 1) + "%";
-    }
-    body += "\nStatus: " + String(usageState(usageLevel(window)));
-  }
-  body += "\n\n" + (window.resetText.length() ? window.resetText : String("Reset unavailable"));
-  body += "\nProvider: " + rowStatus[index];
-  return body;
-}
-
-static String cursorPaceDetails() {
-  const RecentUsage30m &recent = latestCursor.recent30m;
-  String body = "Calls: " + String(recent.calls) + "\nToken data: " + String(recent.tokenizedCalls) + "/" + String(recent.calls) + " calls";
-  body += "\nTotal tokens: " + formatUnsigned(totalTokens(recent));
-  body += "\nInput: " + formatUnsigned(recent.inputTokens) + "\nOutput: " + formatUnsigned(recent.outputTokens);
-  body += "\nCache read: " + formatUnsigned(recent.cacheReadTokens) + "\nCache write: " + formatUnsigned(recent.cacheWriteTokens);
-  if (recent.costCents >= 0) body += "\nCost: $" + String(recent.costCents / 100.0f, 4);
-  if (recent.topModel.length()) body += "\nTop model: " + recent.topModel;
-  if (recent.topKind.length()) body += "\nTop call type: " + recent.topKind;
-  body += "\nMax Mode calls: " + String(recent.maxModeCalls);
-  body += "\n\nStatus: " + (recent.status.length() ? recent.status : String("unavailable"));
-  return body;
-}
-
-static String codexPaceDetails() {
-  const RecentUsage30m &recent = latestCodex.recent30m;
-  String body = "Weekly change: +" + String(recent.deltaPercent, 2) + " pp\nMeasurements: " + String(recent.samples) +
-                "\nFilled buckets: " + String(validBucketCount(recent)) + "/6\n\n5-minute buckets:";
-  for (uint8_t i = 0; i < 6; ++i) {
-    body += "\n" + String(i + 1) + ": ";
-    body += recent.buckets[i].valid ? "+" + String(recent.buckets[i].deltaPercent, 2) + " pp" : String("no sample");
-  }
-  body += "\n\nStatus: " + (recent.status.length() ? recent.status : String("unavailable"));
-  return body;
-}
-
-static void openDetails(lv_event_t *event) {
-  if (detailsOpen) return;
-  detailsOpen = true;
-  uint8_t index = (uint8_t)(uintptr_t)lv_event_get_user_data(event);
-  Serial.printf("[touch] long press -> details=%u\n", index);
-  lv_obj_t *backdrop = lv_obj_create(lv_scr_act());
-  lv_obj_set_size(backdrop, 480, 480); lv_obj_set_pos(backdrop, 0, 0);
-  lv_obj_set_style_bg_color(backdrop, C(0x000000), 0); lv_obj_set_style_bg_opa(backdrop, LV_OPA_80, 0);
-  lv_obj_set_style_border_width(backdrop, 0, 0); lv_obj_set_style_pad_all(backdrop, 0, 0);
-  lv_obj_clear_flag(backdrop, LV_OBJ_FLAG_SCROLLABLE); lv_obj_add_flag(backdrop, LV_OBJ_FLAG_CLICKABLE);
-
-  lv_obj_t *modal = lv_obj_create(backdrop);
-  lv_obj_set_size(modal, 438, index < 4 ? 330 : 410); lv_obj_center(modal); panelStyle(modal);
-  lv_obj_set_style_pad_all(modal, 20, 0);
-  const char *titleText = index < 4 ? rowNames[index].c_str() : index == 4 ? "CURSOR / LAST 30 MIN" : "CODEX / LAST 30 MIN";
-  lv_obj_t *title = label(modal, titleText, &lv_font_montserrat_20, C(0xF4F4F4));
-  lv_obj_align(title, LV_ALIGN_TOP_LEFT, 0, 0);
-  String bodyText = index < 4 ? standardDetails(index) : index == 4 ? cursorPaceDetails() : codexPaceDetails();
-  lv_obj_t *body = label(modal, bodyText.c_str(), &lv_font_montserrat_14, C(0xB8B8B8));
-  lv_obj_set_width(body, 390); lv_label_set_long_mode(body, LV_LABEL_LONG_WRAP); lv_obj_align(body, LV_ALIGN_TOP_LEFT, 0, 42);
-  lv_obj_t *close = lv_btn_create(modal);
-  lv_obj_set_size(close, 104, 40); lv_obj_align(close, LV_ALIGN_BOTTOM_RIGHT, 0, 0);
-  lv_obj_set_style_bg_color(close, C(0x252525), 0); lv_obj_set_style_radius(close, 8, 0);
-  lv_obj_t *closeText = label(close, "CLOSE", &lv_font_montserrat_14, C(0xFFFFFF)); lv_obj_center(closeText);
-  lv_obj_add_event_cb(close, closeModal, LV_EVENT_SHORT_CLICKED, backdrop);
-}
-
 static void renderMetric(uint8_t index) {
   if (!rows[index]) return;
   const UsageWindow &window = rowData[index];
@@ -398,7 +339,7 @@ static void renderMetric(uint8_t index) {
     float amount = availableView && window.limitAmount >= 0
       ? max(0.0f, window.limitAmount - window.usedAmount) : window.usedAmount;
     valueText = amount < 0 ? "--" : window.currencySymbol + String(amount, 2);
-  } else valueText = shown < 0 ? "--%" : String(shown, 0) + "%";
+  } else valueText = shown < 0 ? "--%" : String(shown, index == 3 ? 0 : 1) + "%";
   lv_label_set_text(statusLabels[index], usageState(level)); lv_obj_set_style_text_color(statusLabels[index], color, 0);
   lv_label_set_text(values[index], valueText.c_str()); lv_obj_set_style_text_color(values[index], color, 0);
   lv_obj_set_style_base_dir(bars[index], availableView ? LV_BASE_DIR_RTL : LV_BASE_DIR_LTR, 0);
@@ -483,17 +424,12 @@ bool displayToggleRemainingView() {
   return displaySetRemainingView(!availableView);
 }
 
-static void addTouchCallbacks(lv_obj_t *object, uint8_t detailIndex) {
-  lv_obj_add_flag(object, LV_OBJ_FLAG_CLICKABLE);
-  lv_obj_add_event_cb(object, openDetails, LV_EVENT_LONG_PRESSED, (void *)(uintptr_t)detailIndex);
-}
-
 static void makeUsageRow(lv_obj_t *parent, uint8_t index, int x, int y, int width, int height) {
   lv_obj_t *row = lv_obj_create(parent);
   lv_obj_set_size(row, width, height); lv_obj_set_pos(row, x, y);
   lv_obj_set_style_bg_opa(row, LV_OPA_TRANSP, 0); lv_obj_set_style_border_width(row, 0, 0);
   lv_obj_set_style_pad_all(row, 0, 0); lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
-  rows[index] = row; addTouchCallbacks(row, index);
+  rows[index] = row;
   lv_obj_t *name = label(row, rowNames[index].c_str(), &lv_font_montserrat_14, C(0xF2F2F2)); lv_obj_set_pos(name, 0, 0);
   statusLabels[index] = label(row, "WAITING", &lv_font_montserrat_12, C(0x888888)); lv_obj_align(statusLabels[index], LV_ALIGN_TOP_RIGHT, -78, 1);
   values[index] = label(row, "--%", &lv_font_montserrat_20, C(0xF2F2F2)); lv_obj_align(values[index], LV_ALIGN_TOP_RIGHT, 0, -3);
@@ -521,7 +457,7 @@ static void makePaceRow(lv_obj_t *parent, uint8_t provider, int x, int y, int wi
   lv_obj_t *row = lv_obj_create(parent);
   lv_obj_set_size(row, width, height); lv_obj_set_pos(row, x, y);
   lv_obj_set_style_bg_opa(row, LV_OPA_TRANSP, 0); lv_obj_set_style_border_width(row, 0, 0); lv_obj_set_style_pad_all(row, 0, 0);
-  lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE); paceRows[provider] = row; addTouchCallbacks(row, provider == 0 ? 4 : 5);
+  lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE); paceRows[provider] = row;
   lv_obj_t *topLine = lv_obj_create(row); lv_obj_set_size(topLine, width, 1); lv_obj_set_pos(topLine, 0, 0);
   lv_obj_set_style_bg_color(topLine, C(0x242424), 0); lv_obj_set_style_bg_opa(topLine, LV_OPA_COVER, 0); lv_obj_set_style_border_width(topLine, 0, 0); lv_obj_set_style_pad_all(topLine, 0, 0);
   lv_obj_clear_flag(topLine, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
@@ -667,6 +603,11 @@ void displayLoop() {
     touchToggleEvents++; touchLastEventMs = millis(); touchLastEvent = "view toggled";
     toggleView();
   }
+  if (millis() - lastStatusRefreshMs >= 1000) {
+    lastStatusRefreshMs = millis();
+    updateProviderStatuses();
+    renderAll();
+  }
 }
 void displaySetBrightness(uint8_t value) {
   displayBacklightOn = value > 0;
@@ -729,16 +670,14 @@ const uint16_t *displayGetFramebuffer() {
   return gfx ? gfx->getFramebuffer() : nullptr;
 }
 
-void displayUpdate(const UsageSnapshot &codex, const UsageSnapshot &cursor, uint8_t warningPercent, uint8_t criticalPercent) {
+void displayUpdate(const UsageSnapshot &codex, const UsageSnapshot &cursor, uint8_t warningPercent, uint8_t criticalPercent, uint16_t refreshMinutes) {
   latestCodex = codex; latestCursor = cursor; warningLevel = warningPercent; criticalLevel = criticalPercent;
+  staleAfterSeconds = max((uint32_t)120, (uint32_t)refreshMinutes * 60 + 90);
   rowData[0] = cursor.primary; rowData[1] = cursor.secondary; rowData[2] = cursor.tertiary;
   rowData[3] = codex.secondary;
   for (uint8_t i = 0; i < 3; ++i) rowStatus[i] = cursor.status;
   rowStatus[3] = codex.status;
-  if (providerStatusLabels[0]) {
-    lv_label_set_text(providerStatusLabels[0], cursor.ok ? "ONLINE" : cursor.status == "disabled" ? "DISABLED" : "NO DATA");
-    lv_obj_set_style_text_color(providerStatusLabels[0], C(cursor.ok ? 0x45D597 : 0x888888), 0);
-  }
+  updateProviderStatuses();
   String cursorPlan = formatPlanBadge(cursor.plan), codexPlan = formatPlanBadge(codex.plan);
   if (providerPlanLabels[0]) {
     lv_label_set_text(providerPlanLabels[0], cursorPlan.c_str());
@@ -747,10 +686,6 @@ void displayUpdate(const UsageSnapshot &codex, const UsageSnapshot &cursor, uint
   if (providerPlanLabels[1]) {
     lv_label_set_text(providerPlanLabels[1], codexPlan.c_str());
     if (codexPlan.length()) lv_obj_clear_flag(providerPlanLabels[1], LV_OBJ_FLAG_HIDDEN); else lv_obj_add_flag(providerPlanLabels[1], LV_OBJ_FLAG_HIDDEN);
-  }
-  if (providerStatusLabels[1]) {
-    lv_label_set_text(providerStatusLabels[1], codex.ok ? "ONLINE" : codex.status == "disabled" ? "DISABLED" : "NO DATA");
-    lv_obj_set_style_text_color(providerStatusLabels[1], C(codex.ok ? 0x45D597 : 0x888888), 0);
   }
   renderAll();
   Serial.printf("[display] view=%s, Cursor %.1f / %.1f / %.1f, Codex weekly %.1f\n",

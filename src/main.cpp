@@ -6,6 +6,7 @@
 #include <time.h>
 #include "AppConfig.h"
 #include "Display.h"
+#include "BuildInfo.h"
 #include "WebPortal.h"
 #include "providers/CodexProvider.h"
 #include "providers/CursorProvider.h"
@@ -177,14 +178,18 @@ void loop(){
   if(WiFi.status()==WL_CONNECTED&&(lastFetch==0||millis()-lastFetch>(uint32_t)config.refreshMinutes*60000UL)){
     lastFetch=millis(); Serial.println("[usage] Refreshing Codex and Cursor");
     UsageSnapshot freshCodex=codex.fetch(config.codex,config.verifyTls);
-    if(freshCodex.ok){updateCodexPace(freshCodex);cs=freshCodex;}
+    if(freshCodex.ok){freshCodex.receivedAtMs=millis();updateCodexPace(freshCodex);cs=freshCodex;}
     else if(cs.ok){
       cs.status="stale: "+freshCodex.status;
       Serial.printf("[usage][codex] Keeping last valid snapshot after %s\n",freshCodex.status.c_str());
     }else cs=freshCodex;
     Serial.printf("[usage][codex] %s\n",cs.status.c_str());
-    us=cursor.fetch(config.cursor,config.verifyTls); Serial.printf("[usage][cursor] %s\n",us.status.c_str());
-    displayUpdate(cs,us,config.warningPercent,config.criticalPercent); webUpdateUsage(cs,us);
+    UsageSnapshot freshCursor=cursor.fetch(config.cursor,config.verifyTls);
+    if(freshCursor.ok){freshCursor.receivedAtMs=millis();us=freshCursor;}
+    else if(us.ok){us.status="stale: "+freshCursor.status;}
+    else us=freshCursor;
+    Serial.printf("[usage][cursor] %s\n",us.status.c_str());
+    displayUpdate(cs,us,config.warningPercent,config.criticalPercent,config.refreshMinutes); webUpdateUsage(cs,us);
   }
   delay(5);
 }
