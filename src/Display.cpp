@@ -614,6 +614,15 @@ void displaySetBrightness(uint8_t value) {
   digitalWrite(38, displayBacklightOn ? HIGH : LOW);
 }
 
+bool displayTogglePower() {
+  displaySetBrightness(displayBacklightOn ? 0 : 1);
+  return displayBacklightOn;
+}
+
+bool displayIsOn() {
+  return displayBacklightOn;
+}
+
 bool displayConsumeTouchActivity() {
   bool activity = touchActivityPending;
   touchActivityPending = false;

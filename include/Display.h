@@ -39,6 +39,8 @@ struct TouchDiagnostics {
 void displayBegin(const AppConfig &config);
 void displayLoop();
 void displaySetBrightness(uint8_t value);
+bool displayTogglePower();
+bool displayIsOn();
 bool displayConsumeTouchActivity();
 bool displaySetRemainingView(bool remaining);
 bool displayToggleRemainingView();
