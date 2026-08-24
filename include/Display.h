@@ -45,4 +45,5 @@ bool displayToggleRemainingView();
 void displayUpdate(const UsageSnapshot &codex, const UsageSnapshot &cursor, uint8_t warningPercent, uint8_t criticalPercent);
 void displaySetNetwork(const String &text, bool connected);
 TouchDiagnostics displayGetTouchDiagnostics();
+const uint16_t *displayGetFramebuffer();
 
