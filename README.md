@@ -6,7 +6,7 @@ Native, standalone firmware for the 4-inch GUITION ESP32-S3 4848S040 (480×480),
 
 ## What is included
 
-- Modern 480×480 LVGL dashboard with Cursor/Codex provider icons, three selectable designs, individually selectable rows, wide progress bars, reset-period pace markers, and status colors
+- Modern 480×480 LVGL dashboard with Cursor/Codex provider icons, four selectable designs, individually selectable rows, wide progress bars, reset-period pace markers, and status colors
 - Touch operation: short tap switches the whole dashboard between `USED` and `REMAINING`; long press opens details for the selected limit or 30-minute row
 - Six 5-minute activity buckets for Cursor tokens/calls and Codex weekly-limit changes
 - ST7701S RGB panel, GT911 touch, 150 Hz PWM backlight, octal PSRAM, and 16 MB flash configuration
@@ -118,7 +118,7 @@ The display maps the currently observed response fields as follows:
 - Other Models: `individualUsage.plan.apiPercentUsed`
 - On Demand: percentage calculated from `individualUsage.onDemand.used` and `.limit` (with `teamUsage.onDemand` as a fallback)
 
-All three Cursor limits use `billingCycleStart` and `billingCycleEnd` for the remaining reset time and white elapsed-period marker. Codex uses the rate-limit windows' duration and reset time for the same marker; adapters can supply `elapsed_percent`. Under **Display and status**, choose **Panels** for framed provider sections, **Flat** for open sections, or **Telemetry** for layered signal cards with separate Cursor and Codex accents. Each Cursor limit, both 30-minute rows, and both Codex limit rows can be enabled separately; every design expands automatically to use the 480×480 display.
+All three Cursor limits use `billingCycleStart` and `billingCycleEnd` for the remaining reset time and white elapsed-period marker. Codex uses the rate-limit windows' duration and reset time for the same marker; adapters can supply `elapsed_percent`. Under **Display and status**, choose **Panels** for framed provider sections, **Flat** for open sections, **Telemetry** for layered signal cards, or **Matrix** for independent Cursor and Codex columns. Each Cursor limit, both 30-minute rows, and both Codex limit rows can be enabled separately; every design expands automatically to use the 480×480 display.
 
 In `USED` mode a normal bar fills from the left with the consumed percentage. In `REMAINING` mode the displayed value is `100 − used` and the bar fills from the right; for example, 10% remaining occupies the rightmost 10%. The white pace marker is read as the remaining time from the right in that mode. The preferred mode can be selected persistently in the web UI, so Touch is not required. A short tap is recognized directly from the GT911 press/release gesture and temporarily switches modes until restart, independent of LVGL object hit-testing. The activity mini-charts always show consumption and are never inverted. A long press on a limit opens Used, Remaining, Reset, elapsed period, and provider status; long-pressing a 30-minute row opens Cursor token/call details or Codex measurement buckets.
 
