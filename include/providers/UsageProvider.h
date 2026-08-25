@@ -44,7 +44,6 @@ struct RecentUsage30m {
 
 struct UsageSnapshot {
   String provider; bool ok = false; String status; String plan; String updated;
-  String rateLimitReachedType;
   uint32_t receivedAtMs = 0;
   UsageWindow primary; UsageWindow secondary; UsageWindow tertiary; float credits = -1;
   RecentUsage30m recent30m;

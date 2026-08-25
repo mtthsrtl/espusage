@@ -140,13 +140,9 @@ static void updateCodexPace(UsageSnapshot &snapshot) {
 }
 
 static void applyCodexCreditsFallback(UsageSnapshot &snapshot) {
-  if (!config.codexCreditsFallback || snapshot.credits < 0 || !snapshot.rateLimitReachedType.length()) return;
-  String reached = snapshot.rateLimitReachedType;
-  reached.toLowerCase();
-  bool namesPrimary = reached.indexOf("primary") >= 0 || reached.indexOf("5") >= 0 || reached.indexOf("hour") >= 0;
-  bool namesWeekly = reached.indexOf("secondary") >= 0 || reached.indexOf("week") >= 0;
-  auto replaceExhaustedLimit = [&](UsageWindow &window, bool named) {
-    if (window.usedPercent < 99.0f || (!named && (namesPrimary || namesWeekly))) return;
+  if (!config.codexCreditsFallback || snapshot.credits < 0) return;
+  auto replaceExhaustedLimit = [&](UsageWindow &window) {
+    if (window.usedPercent < 98.5f) return;
     String reset = window.resetText;
     window.label = "CREDITS";
     window.usedPercent = 0;
@@ -159,8 +155,8 @@ static void applyCodexCreditsFallback(UsageSnapshot &snapshot) {
     window.resetText = "balance";
     if (reset.length()) window.resetText += " - " + reset;
   };
-  replaceExhaustedLimit(snapshot.primary, namesPrimary);
-  replaceExhaustedLimit(snapshot.secondary, namesWeekly);
+  replaceExhaustedLimit(snapshot.primary);
+  replaceExhaustedLimit(snapshot.secondary);
 }
 
 static void startRecoveryAp(const char *name){

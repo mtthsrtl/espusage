@@ -347,7 +347,7 @@ static void renderMetric(uint8_t index) {
   const UsageWindow &window = rowData[index];
   float used = window.usedPercent;
   float shown = used < 0 ? -1 : availableView ? 100.0f - used : used;
-  if (index >= 3 && availableView && used >= 99.0f) shown = 0;
+  if (index >= 3 && availableView && shown >= 0 && shown < 1.5f) shown = 0;
   UsageLevel level = usageLevel(window);
   uint32_t colorValue = usageColorValue(level);
   lv_color_t color = C(colorValue);
