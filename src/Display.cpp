@@ -314,9 +314,9 @@ static uint32_t gradientEndColor(uint32_t color) {
   uint8_t red = (color >> 16) & 0xFF;
   uint8_t green = (color >> 8) & 0xFF;
   uint8_t blue = color & 0xFF;
-  red += (255 - red) / 4;
-  green += (255 - green) / 4;
-  blue += (255 - blue) / 4;
+  red = (red * 7) / 10;
+  green = (green * 7) / 10;
+  blue = (blue * 7) / 10;
   return ((uint32_t)red << 16) | ((uint32_t)green << 8) | blue;
 }
 
