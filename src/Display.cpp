@@ -529,9 +529,9 @@ static void makePaceRow(lv_obj_t *parent, uint8_t provider, int x, int y, int wi
 }
 
 static lv_obj_t *makeProviderPanel(const char *title, uint8_t provider, int y, int height, bool flat, int &innerX, int &innerWidth) {
-  bool wide = flat || telemetryDesign;
-  int panelX = wide ? 8 : 12, panelWidth = wide ? 464 : 456;
-  innerX = wide ? 8 : 14; innerWidth = panelWidth - innerX * 2;
+  int panelX = telemetryDesign ? 8 : flat ? 4 : 8;
+  int panelWidth = telemetryDesign ? 464 : flat ? 472 : 464;
+  innerX = (flat || telemetryDesign) ? 8 : 14; innerWidth = panelWidth - innerX * 2;
   lv_obj_t *panel = lv_obj_create(lv_scr_act()); lv_obj_set_size(panel, panelWidth, height); lv_obj_set_pos(panel, panelX, y);
   lv_obj_set_style_pad_all(panel, 0, 0); lv_obj_clear_flag(panel, LV_OBJ_FLAG_SCROLLABLE); lv_obj_clear_flag(panel, LV_OBJ_FLAG_CLICKABLE);
   if (telemetryDesign) {
