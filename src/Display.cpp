@@ -40,8 +40,9 @@ static lv_indev_t *touchInputDevice = nullptr;
 static lv_obj_t *networkLabel, *modeLabel, *providerStatusLabels[2], *providerPlanLabels[2];
 static lv_obj_t *statusLabels[5], *values[5], *bars[5], *paceMarkers[5], *resetLabels[5], *rows[5];
 static lv_obj_t *paceRows[2], *paceValues[2], *paceMeta[2], *paceColumns[2][6];
-static int barWidths[5], barOffsets[5], markerY[5], paceChartBaseline[2], paceChartMaxHeight[2];
+static int barWidths[5], barHeights[5], barOffsets[5], barTops[5], markerY[5], paceChartBaseline[2], paceChartMaxHeight[2];
 static String rowNames[5] = {"CURSOR MODELS","OTHER MODELS","ON DEMAND","5-HOUR LIMIT","WEEKLY LIMIT"};
+static const char *columnNames[5] = {"CUR", "OTH", "OD", "5H", "WK"};
 static UsageWindow rowData[5];
 static String rowStatus[5], networkAddress;
 static UsageSnapshot latestCodex, latestCursor;
@@ -53,6 +54,7 @@ static uint32_t paceIndicatorGlowColor = 0xFFFFFF;
 static bool paceIndicatorGlow = false;
 static bool telemetryDesign = false;
 static bool matrixDesign = false;
+static bool columnDesign = false;
 static uint32_t staleAfterSeconds = 390, lastStatusRefreshMs = 0;
 
 static lv_color_t C(uint32_t value) { return lv_color_hex(value); }
@@ -356,19 +358,28 @@ static void renderMetric(uint8_t index) {
   } else valueText = shown < 0 ? "--%" : String(shown, index >= 3 ? 0 : 1) + "%";
   lv_label_set_text(statusLabels[index], usageState(level)); lv_obj_set_style_text_color(statusLabels[index], color, 0);
   lv_label_set_text(values[index], valueText.c_str()); lv_obj_set_style_text_color(values[index], color, 0);
-  lv_obj_set_style_base_dir(bars[index], availableView ? LV_BASE_DIR_RTL : LV_BASE_DIR_LTR, 0);
+  if (columnDesign) {
+    lv_obj_align(values[index], LV_ALIGN_TOP_MID, 0, 0);
+    lv_obj_align(statusLabels[index], LV_ALIGN_TOP_MID, 0, 25);
+  }
+  lv_obj_set_style_base_dir(bars[index], columnDesign ? LV_BASE_DIR_LTR : availableView ? LV_BASE_DIR_RTL : LV_BASE_DIR_LTR, 0);
   lv_obj_set_style_bg_color(bars[index], color, LV_PART_INDICATOR);
   lv_obj_set_style_bg_grad_color(bars[index], C(gradientEndColor(colorValue)), LV_PART_INDICATOR);
-  lv_obj_set_style_bg_grad_dir(bars[index], LV_GRAD_DIR_HOR, LV_PART_INDICATOR);
+  lv_obj_set_style_bg_grad_dir(bars[index], columnDesign ? LV_GRAD_DIR_VER : LV_GRAD_DIR_HOR, LV_PART_INDICATOR);
   lv_bar_set_value(bars[index], shown < 0 ? 0 : (int)constrain(shown, 0, 100), LV_ANIM_OFF);
 
   if (window.elapsedPercent >= 0) {
     float elapsed = constrain(window.elapsedPercent, 0.0f, 100.0f);
-    float remaining = 100.0f - elapsed;
-    int markerX = availableView
-      ? (barWidths[index] - 3) - (int)(remaining * (barWidths[index] - 3) / 100.0f)
-      : (int)(elapsed * (barWidths[index] - 3) / 100.0f);
-    lv_obj_set_pos(paceMarkers[index], barOffsets[index] + markerX, markerY[index]);
+    if (columnDesign) {
+      int markerPosition = barTops[index] + (barHeights[index] - 3) - (int)(elapsed * (barHeights[index] - 3) / 100.0f);
+      lv_obj_set_pos(paceMarkers[index], barOffsets[index] - 4, markerPosition);
+    } else {
+      float remaining = 100.0f - elapsed;
+      int markerX = availableView
+        ? (barWidths[index] - 3) - (int)(remaining * (barWidths[index] - 3) / 100.0f)
+        : (int)(elapsed * (barWidths[index] - 3) / 100.0f);
+      lv_obj_set_pos(paceMarkers[index], barOffsets[index] + markerX, markerY[index]);
+    }
     lv_obj_clear_flag(paceMarkers[index], LV_OBJ_FLAG_HIDDEN); lv_obj_move_foreground(paceMarkers[index]);
   } else lv_obj_add_flag(paceMarkers[index], LV_OBJ_FLAG_HIDDEN);
 
@@ -378,6 +389,7 @@ static void renderMetric(uint8_t index) {
   if (used < 0 && networkAddress.length() && (rowStatus[index] == "disabled" || rowStatus[index].indexOf("missing") >= 0))
     bottom = "Setup: http://" + networkAddress;
   lv_label_set_text(resetLabels[index], bottom.c_str());
+  if (columnDesign) lv_obj_align(resetLabels[index], LV_ALIGN_TOP_MID, 0, barTops[index] + barHeights[index] + 5);
 }
 
 static void renderPace(uint8_t provider) {
@@ -401,6 +413,7 @@ static void renderPace(uint8_t provider) {
   }
   lv_label_set_text(paceValues[provider], valueText.c_str());
   lv_label_set_text(paceMeta[provider], metaText.c_str());
+  if (columnDesign) lv_obj_align(paceValues[provider], LV_ALIGN_TOP_RIGHT, -4, 2);
 
   double maximum = 0;
   for (uint8_t i = 0; i < 6; ++i) {
@@ -528,6 +541,54 @@ static void makePaceRow(lv_obj_t *parent, uint8_t provider, int x, int y, int wi
   }
 }
 
+static void makeColumnMetric(lv_obj_t *parent, uint8_t index, int x, int y, int width, int height) {
+  lv_obj_t *row = lv_obj_create(parent);
+  lv_obj_set_size(row, width, height); lv_obj_set_pos(row, x, y);
+  lv_obj_set_style_bg_opa(row, LV_OPA_TRANSP, 0); lv_obj_set_style_border_width(row, 0, 0); lv_obj_set_style_pad_all(row, 0, 0);
+  lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE); rows[index] = row;
+  values[index] = label(row, "--%", &lv_font_montserrat_20, C(0xF2F2F2)); lv_obj_align(values[index], LV_ALIGN_TOP_MID, 0, 0);
+  statusLabels[index] = label(row, "WAITING", &lv_font_montserrat_12, C(0x888888)); lv_obj_align(statusLabels[index], LV_ALIGN_TOP_MID, 0, 25);
+  int columnWidth = min(42, max(24, width - 18));
+  int columnHeight = max(110, height - 105);
+  int columnX = (width - columnWidth) / 2, columnY = 45;
+  bars[index] = lv_bar_create(row); lv_obj_set_size(bars[index], columnWidth, columnHeight); lv_obj_set_pos(bars[index], columnX, columnY);
+  lv_bar_set_range(bars[index], 0, 100); lv_obj_set_style_bg_color(bars[index], C(0x20282A), LV_PART_MAIN);
+  lv_obj_set_style_bg_opa(bars[index], LV_OPA_COVER, LV_PART_MAIN); lv_obj_set_style_radius(bars[index], 7, LV_PART_MAIN); lv_obj_set_style_radius(bars[index], 7, LV_PART_INDICATOR);
+  lv_obj_clear_flag(bars[index], LV_OBJ_FLAG_CLICKABLE);
+  barWidths[index] = columnWidth; barHeights[index] = columnHeight; barOffsets[index] = columnX; barTops[index] = columnY; markerY[index] = 0;
+  paceMarkers[index] = lv_obj_create(row); lv_obj_set_size(paceMarkers[index], columnWidth + 8, 3); lv_obj_set_pos(paceMarkers[index], columnX - 4, columnY);
+  lv_obj_set_style_bg_color(paceMarkers[index], C(paceIndicatorColor), 0); lv_obj_set_style_bg_opa(paceMarkers[index], LV_OPA_COVER, 0);
+  lv_obj_set_style_shadow_color(paceMarkers[index], C(paceIndicatorGlowColor), 0);
+  lv_obj_set_style_shadow_width(paceMarkers[index], paceIndicatorGlow ? 8 : 0, 0); lv_obj_set_style_shadow_spread(paceMarkers[index], paceIndicatorGlow ? 2 : 0, 0);
+  lv_obj_set_style_shadow_opa(paceMarkers[index], paceIndicatorGlow ? LV_OPA_70 : LV_OPA_TRANSP, 0);
+  lv_obj_set_style_border_width(paceMarkers[index], 0, 0); lv_obj_set_style_radius(paceMarkers[index], 1, 0); lv_obj_set_style_pad_all(paceMarkers[index], 0, 0);
+  lv_obj_clear_flag(paceMarkers[index], LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE); lv_obj_add_flag(paceMarkers[index], LV_OBJ_FLAG_HIDDEN);
+  resetLabels[index] = label(row, "Waiting", &lv_font_montserrat_12, C(0x929292));
+  lv_obj_set_width(resetLabels[index], max(30, width - 6)); lv_label_set_long_mode(resetLabels[index], LV_LABEL_LONG_WRAP);
+  lv_obj_align(resetLabels[index], LV_ALIGN_TOP_MID, 0, columnY + columnHeight + 5);
+  lv_obj_t *name = label(row, columnNames[index], &lv_font_montserrat_20, C(index < 3 ? 0x7EE6BD : 0x91B8E2));
+  lv_obj_align(name, LV_ALIGN_BOTTOM_MID, 0, -2);
+}
+
+static void makeColumnPace(lv_obj_t *parent, uint8_t provider, int x, int y, int width, int height) {
+  lv_obj_t *row = lv_obj_create(parent); lv_obj_set_size(row, width, height); lv_obj_set_pos(row, x, y);
+  lv_obj_set_style_bg_opa(row, LV_OPA_TRANSP, 0); lv_obj_set_style_border_width(row, 0, 0); lv_obj_set_style_pad_all(row, 0, 0);
+  lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE); paceRows[provider] = row;
+  lv_obj_t *title = label(row, "30M", &lv_font_montserrat_14, C(provider == 0 ? 0x7EE6BD : 0x91B8E2)); lv_obj_set_pos(title, 4, 1);
+  paceValues[provider] = label(row, "WAITING", &lv_font_montserrat_12, C(0xF2F2F2)); lv_obj_align(paceValues[provider], LV_ALIGN_TOP_RIGHT, -4, 2);
+  paceMeta[provider] = label(row, provider == 0 ? "TOKENS / 6 x 5 MIN" : "WEEKLY CHANGE / 6 x 5 MIN", &lv_font_montserrat_12, C(0x929292)); lv_obj_set_pos(paceMeta[provider], 4, 20);
+  int chartWidth = width - 8, gap = 4, columnWidth = (chartWidth - gap * 5) / 6, chartX = 4;
+  paceChartBaseline[provider] = height - 3; paceChartMaxHeight[provider] = max(8, height - 42);
+  for (uint8_t i = 0; i < 6; ++i) {
+    paceColumns[provider][i] = lv_obj_create(row);
+    lv_obj_set_size(paceColumns[provider][i], columnWidth, 2); lv_obj_set_pos(paceColumns[provider][i], chartX + i * (columnWidth + gap), paceChartBaseline[provider] - 2);
+    lv_obj_set_style_bg_color(paceColumns[provider][i], C(provider == 0 ? 0x35D078 : 0x7198C7), 0);
+    lv_obj_set_style_bg_opa(paceColumns[provider][i], LV_OPA_20, 0); lv_obj_set_style_border_width(paceColumns[provider][i], 0, 0);
+    lv_obj_set_style_radius(paceColumns[provider][i], 1, 0); lv_obj_set_style_pad_all(paceColumns[provider][i], 0, 0);
+    lv_obj_clear_flag(paceColumns[provider][i], LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+  }
+}
+
 static lv_obj_t *makeProviderPanel(const char *title, uint8_t provider, int y, int height, bool flat, int &innerX, int &innerWidth) {
   int panelX = telemetryDesign ? 8 : flat ? 4 : 8;
   int panelWidth = telemetryDesign ? 464 : flat ? 472 : 464;
@@ -587,7 +648,7 @@ static lv_obj_t *makeMatrixPanel(const char *title, uint8_t provider, int x, int
   }
   lv_obj_t *heading = label(panel, title, &lv_font_montserrat_20, C(0xFFFFFF)); lv_obj_set_pos(heading, 35, 5);
   providerPlanLabels[provider] = label(panel, "", &lv_font_montserrat_12, C(0xD7FBEF));
-  lv_obj_set_pos(providerPlanLabels[provider], provider == 0 ? 112 : 103, 7);
+  lv_obj_set_pos(providerPlanLabels[provider], provider == 0 ? 120 : 111, 7);
   lv_obj_set_style_bg_color(providerPlanLabels[provider], C(provider == 0 ? 0x173D33 : 0x1A3047), 0); lv_obj_set_style_bg_opa(providerPlanLabels[provider], LV_OPA_COVER, 0);
   lv_obj_set_style_pad_left(providerPlanLabels[provider], 5, 0); lv_obj_set_style_pad_right(providerPlanLabels[provider], 5, 0);
   lv_obj_set_style_pad_top(providerPlanLabels[provider], 2, 0); lv_obj_set_style_pad_bottom(providerPlanLabels[provider], 2, 0);
@@ -601,10 +662,33 @@ static lv_obj_t *makeMatrixPanel(const char *title, uint8_t provider, int x, int
   return panel;
 }
 
+static lv_obj_t *makeColumnPanel(const char *title, uint8_t provider, int x, int y, int width, int height, int &innerX, int &innerWidth) {
+  lv_obj_t *panel = lv_obj_create(lv_scr_act()); lv_obj_set_size(panel, width, height); lv_obj_set_pos(panel, x, y);
+  lv_obj_set_style_bg_color(panel, C(provider == 0 ? 0x07140F : 0x08111D), 0); lv_obj_set_style_bg_opa(panel, LV_OPA_COVER, 0);
+  lv_obj_set_style_border_width(panel, 0, 0); lv_obj_set_style_radius(panel, 0, 0); lv_obj_set_style_pad_all(panel, 0, 0);
+  lv_obj_clear_flag(panel, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+  innerX = 6; innerWidth = width - 12;
+  lv_obj_t *providerIcon = lv_img_create(panel); lv_img_set_src(providerIcon, provider == 0 ? &cursorProviderIcon : &codexProviderIcon);
+  lv_obj_set_pos(providerIcon, 8, 7); lv_obj_clear_flag(providerIcon, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+  if (provider == 0) {
+    lv_obj_set_style_img_recolor(providerIcon, C(0xFFFFFF), 0); lv_obj_set_style_img_recolor_opa(providerIcon, 180, 0);
+  }
+  lv_obj_t *heading = label(panel, title, &lv_font_montserrat_20, C(0xFFFFFF)); lv_obj_set_pos(heading, 33, 4);
+  providerPlanLabels[provider] = label(panel, "", &lv_font_montserrat_12, C(0xD7FBEF));
+  lv_obj_set_pos(providerPlanLabels[provider], provider == 0 ? 120 : 111, 6);
+  lv_obj_set_style_bg_color(providerPlanLabels[provider], C(provider == 0 ? 0x173D33 : 0x1A3047), 0); lv_obj_set_style_bg_opa(providerPlanLabels[provider], LV_OPA_COVER, 0);
+  lv_obj_set_style_pad_left(providerPlanLabels[provider], 5, 0); lv_obj_set_style_pad_right(providerPlanLabels[provider], 5, 0);
+  lv_obj_set_style_pad_top(providerPlanLabels[provider], 2, 0); lv_obj_set_style_pad_bottom(providerPlanLabels[provider], 2, 0);
+  lv_obj_set_style_radius(providerPlanLabels[provider], 7, 0); lv_obj_add_flag(providerPlanLabels[provider], LV_OBJ_FLAG_HIDDEN);
+  providerStatusLabels[provider] = label(panel, "WAITING", &lv_font_montserrat_12, C(0x888888)); lv_obj_set_pos(providerStatusLabels[provider], 8, 29);
+  return panel;
+}
+
 void displayBegin(const AppConfig &config) {
   availableView = config.displayAvailable;
   telemetryDesign = config.displayStyle == 2;
   matrixDesign = config.displayStyle == 3;
+  columnDesign = config.displayStyle == 4;
   overpaceColor = config.overpaceColor;
   warningColor = config.warningColor;
   paceIndicatorColor = config.paceIndicatorColor;
@@ -626,7 +710,7 @@ void displayBegin(const AppConfig &config) {
 
   lv_obj_set_style_bg_color(lv_scr_act(), C(config.backgroundColor), 0); lv_obj_set_style_bg_opa(lv_scr_act(), LV_OPA_COVER, 0);
   lv_obj_add_flag(lv_scr_act(), LV_OBJ_FLAG_CLICKABLE);
-  const char *dashboardTitle = matrixDesign ? "USAGE MATRIX" : telemetryDesign ? "AI TELEMETRY" : "AI USAGE";
+  const char *dashboardTitle = columnDesign ? "VERTICAL LIMITS" : matrixDesign ? "USAGE MATRIX" : telemetryDesign ? "AI TELEMETRY" : "AI USAGE";
   lv_obj_t *title = label(lv_scr_act(), dashboardTitle, &lv_font_montserrat_20, C(0xFFFFFF)); lv_obj_set_pos(title, 16, 5);
   modeLabel = label(lv_scr_act(), "USED", &lv_font_montserrat_12, C(0xFFFFFF)); lv_obj_align(modeLabel, LV_ALIGN_TOP_MID, 0, 11);
   networkLabel = label(lv_scr_act(), "STARTING", &lv_font_montserrat_12, C(0xF2A93B)); lv_obj_align(networkLabel, LV_ALIGN_TOP_RIGHT, -16, 11);
@@ -639,6 +723,37 @@ void displayBegin(const AppConfig &config) {
   bool codexPaceVisible = config.showCodexThirtyMinute;
   uint8_t cursorUnits = cursorCount + (cursorPaceVisible ? 1 : 0);
   uint8_t codexUnits = codexCount + (codexPaceVisible ? 1 : 0);
+  if (columnDesign) {
+    constexpr int columnTop = 34, columnHeight = 444, columnGap = 4, columnWidth = 238, columnHeader = 48, paceHeight = 68;
+    int columnInnerX, columnInnerWidth;
+    lv_obj_t *cursorPanel = makeColumnPanel("CURSOR", 0, 0, columnTop, columnWidth, columnHeight, columnInnerX, columnInnerWidth);
+    int cursorMetricHeight = columnHeight - columnHeader - (cursorPaceVisible ? paceHeight : 0);
+    if (cursorCount) {
+      int metricWidth = columnInnerWidth / cursorCount;
+      uint8_t made = 0;
+      for (uint8_t i = 0; i < 3; ++i) if (visible[i]) {
+        int width = made + 1 == cursorCount ? columnInnerWidth - made * metricWidth : metricWidth;
+        makeColumnMetric(cursorPanel, i, columnInnerX + made * metricWidth, columnHeader, width, cursorMetricHeight);
+        made++;
+      }
+    }
+    if (cursorPaceVisible) makeColumnPace(cursorPanel, 0, columnInnerX, columnHeight - paceHeight, columnInnerWidth, paceHeight);
+    lv_obj_t *codexPanel = makeColumnPanel("CODEX", 1, columnWidth + columnGap, columnTop, columnWidth, columnHeight, columnInnerX, columnInnerWidth);
+    int codexMetricHeight = columnHeight - columnHeader - (codexPaceVisible ? paceHeight : 0);
+    if (codexCount) {
+      int metricWidth = columnInnerWidth / codexCount;
+      uint8_t made = 0;
+      for (uint8_t i = 3; i < 5; ++i) if (visible[i]) {
+        int width = made + 1 == codexCount ? columnInnerWidth - made * metricWidth : metricWidth;
+        makeColumnMetric(codexPanel, i, columnInnerX + made * metricWidth, columnHeader, width, codexMetricHeight);
+        made++;
+      }
+    }
+    if (codexPaceVisible) makeColumnPace(codexPanel, 1, columnInnerX, columnHeight - paceHeight, columnInnerWidth, paceHeight);
+    Serial.printf("[display] Vertical layout: Cursor metrics=%u, Codex metrics=%u\n", cursorCount, codexCount);
+    renderAll();
+    return;
+  }
   if (matrixDesign) {
     constexpr int matrixTop = 34, matrixHeight = 444, matrixGap = 6, matrixHeader = 50;
     bool twoColumns = cursorUnits && codexUnits;
