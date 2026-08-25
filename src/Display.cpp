@@ -310,13 +310,13 @@ static uint32_t usageColorValue(UsageLevel level) {
   return 0x7D7D7D;
 }
 
-static uint32_t lightlyBrightened(uint32_t color) {
+static uint32_t gradientEndColor(uint32_t color) {
   uint8_t red = (color >> 16) & 0xFF;
   uint8_t green = (color >> 8) & 0xFF;
   uint8_t blue = color & 0xFF;
-  red += (255 - red) / 8;
-  green += (255 - green) / 8;
-  blue += (255 - blue) / 8;
+  red += (255 - red) / 4;
+  green += (255 - green) / 4;
+  blue += (255 - blue) / 4;
   return ((uint32_t)red << 16) | ((uint32_t)green << 8) | blue;
 }
 
@@ -356,7 +356,7 @@ static void renderMetric(uint8_t index) {
   lv_label_set_text(values[index], valueText.c_str()); lv_obj_set_style_text_color(values[index], color, 0);
   lv_obj_set_style_base_dir(bars[index], availableView ? LV_BASE_DIR_RTL : LV_BASE_DIR_LTR, 0);
   lv_obj_set_style_bg_color(bars[index], color, LV_PART_INDICATOR);
-  lv_obj_set_style_bg_grad_color(bars[index], C(lightlyBrightened(colorValue)), LV_PART_INDICATOR);
+  lv_obj_set_style_bg_grad_color(bars[index], C(gradientEndColor(colorValue)), LV_PART_INDICATOR);
   lv_obj_set_style_bg_grad_dir(bars[index], LV_GRAD_DIR_HOR, LV_PART_INDICATOR);
   lv_bar_set_value(bars[index], shown < 0 ? 0 : (int)constrain(shown, 0, 100), LV_ANIM_OFF);
 
