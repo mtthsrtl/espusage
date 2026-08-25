@@ -364,13 +364,15 @@ static void renderMetric(uint8_t index) {
     lv_obj_align(values[index], LV_ALIGN_TOP_MID, 0, 0);
     lv_obj_align(statusLabels[index], LV_ALIGN_TOP_MID, 0, 25);
   }
+  if (window.monetary) lv_obj_add_flag(bars[index], LV_OBJ_FLAG_HIDDEN);
+  else lv_obj_clear_flag(bars[index], LV_OBJ_FLAG_HIDDEN);
   lv_obj_set_style_base_dir(bars[index], columnDesign ? LV_BASE_DIR_LTR : availableView ? LV_BASE_DIR_RTL : LV_BASE_DIR_LTR, 0);
   lv_obj_set_style_bg_color(bars[index], color, LV_PART_INDICATOR);
   lv_obj_set_style_bg_grad_color(bars[index], C(gradientEndColor(colorValue)), LV_PART_INDICATOR);
   lv_obj_set_style_bg_grad_dir(bars[index], columnDesign ? LV_GRAD_DIR_VER : LV_GRAD_DIR_HOR, LV_PART_INDICATOR);
   lv_bar_set_value(bars[index], shown < 0 ? 0 : (int)constrain(shown, 0, 100), LV_ANIM_OFF);
 
-  if (window.elapsedPercent >= 0) {
+  if (!window.monetary && window.elapsedPercent >= 0) {
     float elapsed = constrain(window.elapsedPercent, 0.0f, 100.0f);
     if (columnDesign) {
       int markerPosition = barTops[index] + (int)(elapsed * (barHeights[index] - 3) / 100.0f);
@@ -391,7 +393,7 @@ static void renderMetric(uint8_t index) {
   if (used < 0 && networkAddress.length() && (rowStatus[index] == "disabled" || rowStatus[index].indexOf("missing") >= 0))
     bottom = "Setup: http://" + networkAddress;
   lv_label_set_text(resetLabels[index], bottom.c_str());
-  if (columnDesign) lv_obj_align(resetLabels[index], LV_ALIGN_TOP_MID, 0, barTops[index] + barHeights[index] + 5);
+  if (columnDesign) lv_obj_align(resetLabels[index], LV_ALIGN_TOP_MID, 0, window.monetary ? 52 : barTops[index] + barHeights[index] + 5);
 }
 
 static void renderPace(uint8_t provider) {
