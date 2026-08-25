@@ -102,7 +102,7 @@ The direct route is **undocumented and unsupported** and may stop working. A cus
 
 Only use an adapter you control and trust. The current implementation may forward stored authorization information to the configured destination.
 
-The Codex section shows the weekly limit plus an optional **Last 30 min** row. The latter is calculated locally from changes to the weekly percentage and displays their total in percentage points, for example `+7.00 PP` when the used weekly value rises from 20% to 27%. The first successful request establishes a `COLLECTING 1/2` baseline; the value appears after the second successful measurement. Six five-minute buckets remain in RAM and are cleared after reboot or a detected weekly reset. The Codex five-hour row remains removed.
+The Codex section supports separate **5-hour limit** and **weekly limit** rows. A rate-limit window of up to six hours is assigned to the 5-hour row; longer windows are assigned to the weekly row. If the usage response omits either window, its row remains available but displays `--%` until that data is supplied.
 
 The firmware deliberately does not use OpenAI's [organization Usage API](https://developers.openai.com/api/reference/resources/admin/subresources/organization/subresources/usage). That API requires an organization admin key and measures OpenAI API organization usage; it does not represent the consumer Codex/ChatGPT subscription gauges shown here.
 

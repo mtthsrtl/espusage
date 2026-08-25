@@ -35,6 +35,7 @@ struct AppConfig {
   bool showCursorOther = true;
   bool showCursorOnDemand = true;
   bool showCursorThirtyMinute = true;
+  bool showCodexFiveHour = true;
   bool showCodexWeekly = true;
   bool showCodexThirtyMinute = true;
 };

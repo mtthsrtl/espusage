@@ -38,12 +38,12 @@ static uint32_t touchLastCallbackMs = 0, touchFallbackReads = 0;
 static lv_indev_t *touchInputDevice = nullptr;
 
 static lv_obj_t *networkLabel, *modeLabel, *providerStatusLabels[2], *providerPlanLabels[2];
-static lv_obj_t *statusLabels[4], *values[4], *bars[4], *paceMarkers[4], *resetLabels[4], *rows[4];
+static lv_obj_t *statusLabels[5], *values[5], *bars[5], *paceMarkers[5], *resetLabels[5], *rows[5];
 static lv_obj_t *paceRows[2], *paceValues[2], *paceMeta[2], *paceColumns[2][6];
-static int barWidths[4], markerY[4], paceChartBaseline[2], paceChartMaxHeight[2];
-static String rowNames[4] = {"CURSOR MODELS","OTHER MODELS","ON DEMAND","WEEKLY LIMIT"};
-static UsageWindow rowData[4];
-static String rowStatus[4], networkAddress;
+static int barWidths[5], markerY[5], paceChartBaseline[2], paceChartMaxHeight[2];
+static String rowNames[5] = {"CURSOR MODELS","OTHER MODELS","ON DEMAND","5-HOUR LIMIT","WEEKLY LIMIT"};
+static UsageWindow rowData[5];
+static String rowStatus[5], networkAddress;
 static UsageSnapshot latestCodex, latestCursor;
 static bool availableView = false;
 static uint8_t warningLevel = 70, criticalLevel = 90;
@@ -339,7 +339,7 @@ static void renderMetric(uint8_t index) {
     float amount = availableView && window.limitAmount >= 0
       ? max(0.0f, window.limitAmount - window.usedAmount) : window.usedAmount;
     valueText = amount < 0 ? "--" : window.currencySymbol + String(amount, 2);
-  } else valueText = shown < 0 ? "--%" : String(shown, index == 3 ? 0 : 1) + "%";
+  } else valueText = shown < 0 ? "--%" : String(shown, index >= 3 ? 0 : 1) + "%";
   lv_label_set_text(statusLabels[index], usageState(level)); lv_obj_set_style_text_color(statusLabels[index], color, 0);
   lv_label_set_text(values[index], valueText.c_str()); lv_obj_set_style_text_color(values[index], color, 0);
   lv_obj_set_style_base_dir(bars[index], availableView ? LV_BASE_DIR_RTL : LV_BASE_DIR_LTR, 0);
@@ -402,7 +402,7 @@ static void renderPace(uint8_t provider) {
 
 static void renderAll() {
   lv_label_set_text(modeLabel, availableView ? "REMAINING" : "USED");
-  for (uint8_t i = 0; i < 4; ++i) renderMetric(i);
+  for (uint8_t i = 0; i < 5; ++i) renderMetric(i);
   renderPace(0); renderPace(1);
   lv_obj_invalidate(lv_scr_act()); lv_refr_now(nullptr);
 }
@@ -536,9 +536,9 @@ void displayBegin(const AppConfig &config) {
   networkLabel = label(lv_scr_act(), "STARTING", &lv_font_montserrat_12, C(0xF2A93B)); lv_obj_align(networkLabel, LV_ALIGN_TOP_RIGHT, -16, 11);
 
   bool flat = config.displayStyle == 1;
-  bool visible[4] = {config.showCursorModels, config.showCursorOther, config.showCursorOnDemand, config.showCodexWeekly};
+  bool visible[5] = {config.showCursorModels, config.showCursorOther, config.showCursorOnDemand, config.showCodexFiveHour, config.showCodexWeekly};
   uint8_t cursorCount = visible[0] + visible[1] + visible[2];
-  uint8_t codexCount = visible[3];
+  uint8_t codexCount = visible[3] + visible[4];
   bool cursorPaceVisible = config.showCursorThirtyMinute;
   bool codexPaceVisible = config.showCodexThirtyMinute;
   uint8_t cursorUnits = cursorCount + (cursorPaceVisible ? 1 : 0);
@@ -574,9 +574,11 @@ void displayBegin(const AppConfig &config) {
   if (codexUnits) {
     lv_obj_t *codexPanel = makeProviderPanel("CODEX", 1, y, codexHeight, flat, innerX, innerWidth);
     int rowY = panelHeader;
-    if (visible[3]) {
-      int height = unitHeight + (!codexPaceVisible ? max(0, remainder) : 0);
-      makeUsageRow(codexPanel, 3, innerX, rowY, innerWidth, height); rowY += height;
+    uint8_t made = 0;
+    for (uint8_t i = 3; i < 5; ++i) if (visible[i]) {
+      made++;
+      int height = unitHeight + (!codexPaceVisible && made == codexCount ? max(0, remainder) : 0);
+      makeUsageRow(codexPanel, i, innerX, rowY, innerWidth, height); rowY += height;
     }
     if (codexPaceVisible) makePaceRow(codexPanel, 1, innerX, rowY, innerWidth, unitHeight + max(0, remainder));
   }
@@ -683,9 +685,9 @@ void displayUpdate(const UsageSnapshot &codex, const UsageSnapshot &cursor, uint
   latestCodex = codex; latestCursor = cursor; warningLevel = warningPercent; criticalLevel = criticalPercent;
   staleAfterSeconds = max((uint32_t)120, (uint32_t)refreshMinutes * 60 + 90);
   rowData[0] = cursor.primary; rowData[1] = cursor.secondary; rowData[2] = cursor.tertiary;
-  rowData[3] = codex.secondary;
+  rowData[3] = codex.primary; rowData[4] = codex.secondary;
   for (uint8_t i = 0; i < 3; ++i) rowStatus[i] = cursor.status;
-  rowStatus[3] = codex.status;
+  rowStatus[3] = codex.status; rowStatus[4] = codex.status;
   updateProviderStatuses();
   String cursorPlan = formatPlanBadge(cursor.plan), codexPlan = formatPlanBadge(codex.plan);
   if (providerPlanLabels[0]) {
