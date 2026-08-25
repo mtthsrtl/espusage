@@ -10,7 +10,7 @@
 #include "WebPortal.h"
 #include "providers/CodexProvider.h"
 #include "providers/CursorProvider.h"
-static AppConfig config; static CodexProvider codex; static CursorProvider cursor; static UsageSnapshot cs,us; static uint32_t lastFetch=0;
+static AppConfig config; static CodexProvider codex; static CursorProvider cursor; static UsageSnapshot cs,us; static uint32_t lastFetch=0; static bool usageRefreshRequested=false;
 static volatile uint8_t lastDisconnectReason=0;
 static String startupNetworkText="STARTING"; static bool startupNetworkConnected=false;
 static constexpr const char *DISPLAY_TIMEZONE = "CET-1CEST,M3.5.0/2,M10.5.0/3";
@@ -36,6 +36,11 @@ static void ensureCleanPeripheralBoot() {
   delay(20);
   esp_sleep_enable_timer_wakeup(100000ULL);
   esp_deep_sleep_start();
+}
+
+static void requestUsageRefresh() {
+  usageRefreshRequested = true;
+  Serial.println("[usage][webhook] Immediate refresh requested");
 }
 
 static void clearCodexPace() {
@@ -192,11 +197,11 @@ static bool connectWifi(){
     Serial.println("[wifi][setup] Falling back to recovery portal");startRecoveryAp("ESPUsage-Setup");return false;
   }
 }
-void setup(){Serial.begin(115200);delay(300);Serial.println("\n[boot] ESP Usage starting");ensureCleanPeripheralBoot();loadConfig(config);Serial.printf("[config][nvs] Cursor: enabled=%s, token=%s\n",config.cursor.enabled?"yes":"no",config.cursor.token.length()?"stored":"missing");Serial.printf("[config][nvs] Codex: enabled=%s, access_token=%s, account_id=%s, mode=%s\n",config.codex.enabled?"yes":"no",config.codex.token.length()?"stored":"missing",config.codex.accountId.length()?"stored":"missing",config.codex.endpoint.length()?"adapter":"direct");Serial.printf("[config][nvs] Display off time: %s, %02u:%02u-%02u:%02u Europe/Berlin\n",config.displayOffEnabled?"enabled":"disabled",config.displayOffFromMinutes/60,config.displayOffFromMinutes%60,config.displayOffUntilMinutes/60,config.displayOffUntilMinutes%60);bool connected=connectWifi();displayBegin(config);displaySetBrightness(config.brightness);displaySetNetwork(startupNetworkText,startupNetworkConnected);webBegin(config,!connected);Serial.println("[boot] Web portal ready");}
+void setup(){Serial.begin(115200);delay(300);Serial.println("\n[boot] ESP Usage starting");ensureCleanPeripheralBoot();loadConfig(config);Serial.printf("[config][nvs] Cursor: enabled=%s, token=%s\n",config.cursor.enabled?"yes":"no",config.cursor.token.length()?"stored":"missing");Serial.printf("[config][nvs] Codex: enabled=%s, access_token=%s, account_id=%s, mode=%s\n",config.codex.enabled?"yes":"no",config.codex.token.length()?"stored":"missing",config.codex.accountId.length()?"stored":"missing",config.codex.endpoint.length()?"adapter":"direct");Serial.printf("[config][nvs] Display off time: %s, %02u:%02u-%02u:%02u Europe/Berlin\n",config.displayOffEnabled?"enabled":"disabled",config.displayOffFromMinutes/60,config.displayOffFromMinutes%60,config.displayOffUntilMinutes/60,config.displayOffUntilMinutes%60);bool connected=connectWifi();displayBegin(config);displaySetBrightness(config.brightness);displaySetNetwork(startupNetworkText,startupNetworkConnected);webBegin(config,!connected,requestUsageRefresh);Serial.println("[boot] Web portal ready");}
 void loop(){
   displayLoop(); webLoop(); updateDisplayPower();
-  if(WiFi.status()==WL_CONNECTED&&(lastFetch==0||millis()-lastFetch>(uint32_t)config.refreshMinutes*60000UL)){
-    lastFetch=millis(); Serial.println("[usage] Refreshing Codex and Cursor");
+  if(WiFi.status()==WL_CONNECTED&&(usageRefreshRequested||lastFetch==0||millis()-lastFetch>(uint32_t)config.refreshMinutes*60000UL)){
+    usageRefreshRequested=false; lastFetch=millis(); Serial.println("[usage] Refreshing Codex and Cursor");
     UsageSnapshot freshCodex=codex.fetch(config.codex,config.verifyTls);
     if(freshCodex.ok){freshCodex.receivedAtMs=millis();updateCodexPace(freshCodex);applyCodexCreditsFallback(freshCodex);cs=freshCodex;}
     else if(cs.ok){
