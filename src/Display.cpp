@@ -38,7 +38,7 @@ static uint32_t touchLastCallbackMs = 0, touchFallbackReads = 0;
 static lv_indev_t *touchInputDevice = nullptr;
 
 static lv_obj_t *networkLabel, *modeLabel, *providerStatusLabels[2], *providerPlanLabels[2];
-static lv_obj_t *statusLabels[5], *values[5], *bars[5], *paceMarkers[5], *resetLabels[5], *rows[5];
+static lv_obj_t *nameLabels[5], *statusLabels[5], *values[5], *bars[5], *paceMarkers[5], *resetLabels[5], *rows[5];
 static lv_obj_t *paceRows[2], *paceValues[2], *paceMeta[2], *paceColumns[2][6];
 static int barWidths[5], barHeights[5], barOffsets[5], barTops[5], markerY[5], paceChartBaseline[2], paceChartMaxHeight[2];
 static String rowNames[5] = {"CURSOR MODELS","OTHER MODELS","ON DEMAND","5-HOUR LIMIT","WEEKLY LIMIT"};
@@ -347,10 +347,12 @@ static void renderMetric(uint8_t index) {
   const UsageWindow &window = rowData[index];
   float used = window.usedPercent;
   float shown = used < 0 ? -1 : availableView ? 100.0f - used : used;
+  if (index >= 3 && availableView && used >= 99.0f) shown = 0;
   UsageLevel level = usageLevel(window);
   uint32_t colorValue = usageColorValue(level);
   lv_color_t color = C(colorValue);
   String valueText;
+  if (nameLabels[index]) lv_label_set_text(nameLabels[index], window.label.length() ? window.label.c_str() : rowNames[index].c_str());
   if (window.monetary) {
     float amount = availableView && window.limitAmount >= 0
       ? max(0.0f, window.limitAmount - window.usedAmount) : window.usedAmount;
@@ -475,7 +477,7 @@ static void makeUsageRow(lv_obj_t *parent, uint8_t index, int x, int y, int widt
     lv_obj_set_style_radius(row, 8, 0);
   }
   rows[index] = row;
-  lv_obj_t *name = label(row, rowNames[index].c_str(), &lv_font_montserrat_14, C(0xF2F2F2)); lv_obj_set_pos(name, contentX, matrixDesign ? 7 : telemetryDesign ? 1 : 0);
+  nameLabels[index] = label(row, rowNames[index].c_str(), &lv_font_montserrat_14, C(0xF2F2F2)); lv_obj_set_pos(nameLabels[index], contentX, matrixDesign ? 7 : telemetryDesign ? 1 : 0);
   statusLabels[index] = label(row, "WAITING", &lv_font_montserrat_12, C(0x888888));
   if (matrixDesign) lv_obj_set_pos(statusLabels[index], contentX, 26);
   else lv_obj_align(statusLabels[index], LV_ALIGN_TOP_RIGHT, -(78 + contentX), telemetryDesign ? 2 : 1);

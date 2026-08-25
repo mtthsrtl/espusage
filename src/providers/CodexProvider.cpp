@@ -35,6 +35,13 @@ UsageSnapshot CodexProvider::fetch(const ProviderConfig &cfg, bool tls) {
     int firstSeconds=first["limit_window_seconds"] | 0,secondSeconds=second["limit_window_seconds"] | 0;
     if(!first.isNull()){if(firstSeconds>6*3600)readWindow(first,out.secondary);else readWindow(first,out.primary);}
     if(!second.isNull()){if(secondSeconds>6*3600)readWindow(second,out.secondary);else readWindow(second,out.primary);}
+    JsonVariant credits=d["credits"];
+    if(!credits.isNull() && (credits["has_credits"] | false) && !(credits["unlimited"] | false)) {
+      const char *balance=credits["balance"] | nullptr;
+      if(balance) out.credits=String(balance).toFloat();
+      else out.credits=credits["balance"] | -1.0f;
+    }
+    out.rateLimitReachedType=String((const char*)(d["rate_limit_reached_type"] | ""));
     out.plan=String((const char*)(d["plan_type"] | ""));
     out.ok=out.primary.usedPercent>=0||out.secondary.usedPercent>=0;out.status=out.ok?"online (Codex token)":"usage fields missing";return out;
   }
@@ -43,7 +50,7 @@ UsageSnapshot CodexProvider::fetch(const ProviderConfig &cfg, bool tls) {
   out.primary.usedPercent=primary["used_percent"] | -1.0f;out.primary.elapsedPercent=primary["elapsed_percent"] | -1.0f;out.primary.windowSeconds=primary["window_seconds"] | 0;out.primary.resetText=String((const char*)(primary["reset_text"] | ""));
   out.secondary.usedPercent=weekly["used_percent"] | -1.0f;out.secondary.elapsedPercent=weekly["elapsed_percent"] | -1.0f;out.secondary.windowSeconds=weekly["window_seconds"] | 0;out.secondary.resetText=String((const char*)(weekly["reset_text"] | ""));
   if(out.secondary.usedPercent<0){out.secondary=out.primary;out.primary.usedPercent=-1;out.primary.resetText="";}
-  out.credits=d["credits"] | -1.0f;out.plan=String((const char*)(d["plan"] | ""));
+  out.credits=d["credits"] | -1.0f;out.rateLimitReachedType=String((const char*)(d["rate_limit_reached_type"] | ""));out.plan=String((const char*)(d["plan"] | ""));
   out.ok=out.primary.usedPercent>=0||out.secondary.usedPercent>=0;out.status=out.ok?"online (adapter)":"missing fields";return out;
 }
 

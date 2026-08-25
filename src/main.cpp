@@ -139,6 +139,30 @@ static void updateCodexPace(UsageSnapshot &snapshot) {
                 recent.deltaPercent, recent.samples, validCount, recent.status.c_str());
 }
 
+static void applyCodexCreditsFallback(UsageSnapshot &snapshot) {
+  if (!config.codexCreditsFallback || snapshot.credits < 0 || !snapshot.rateLimitReachedType.length()) return;
+  String reached = snapshot.rateLimitReachedType;
+  reached.toLowerCase();
+  bool namesPrimary = reached.indexOf("primary") >= 0 || reached.indexOf("5") >= 0 || reached.indexOf("hour") >= 0;
+  bool namesWeekly = reached.indexOf("secondary") >= 0 || reached.indexOf("week") >= 0;
+  auto replaceExhaustedLimit = [&](UsageWindow &window, bool named) {
+    if (window.usedPercent < 99.0f || (!named && (namesPrimary || namesWeekly))) return;
+    String reset = window.resetText;
+    window.label = "CREDITS";
+    window.usedPercent = 0;
+    window.elapsedPercent = -1;
+    window.windowSeconds = 0;
+    window.monetary = true;
+    window.usedAmount = snapshot.credits;
+    window.limitAmount = -1;
+    window.currencySymbol = "";
+    window.resetText = "balance";
+    if (reset.length()) window.resetText += " - " + reset;
+  };
+  replaceExhaustedLimit(snapshot.primary, namesPrimary);
+  replaceExhaustedLimit(snapshot.secondary, namesWeekly);
+}
+
 static void startRecoveryAp(const char *name){
   WiFi.disconnect(false,false);delay(150);WiFi.mode(WIFI_AP_STA);bool ok=WiFi.softAP(name);
   Serial.printf("[wifi][setup] AP '%s': %s\n",name,ok?"started":"FAILED");
@@ -178,7 +202,7 @@ void loop(){
   if(WiFi.status()==WL_CONNECTED&&(lastFetch==0||millis()-lastFetch>(uint32_t)config.refreshMinutes*60000UL)){
     lastFetch=millis(); Serial.println("[usage] Refreshing Codex and Cursor");
     UsageSnapshot freshCodex=codex.fetch(config.codex,config.verifyTls);
-    if(freshCodex.ok){freshCodex.receivedAtMs=millis();updateCodexPace(freshCodex);cs=freshCodex;}
+    if(freshCodex.ok){freshCodex.receivedAtMs=millis();updateCodexPace(freshCodex);applyCodexCreditsFallback(freshCodex);cs=freshCodex;}
     else if(cs.ok){
       cs.status="stale: "+freshCodex.status;
       Serial.printf("[usage][codex] Keeping last valid snapshot after %s\n",freshCodex.status.c_str());
