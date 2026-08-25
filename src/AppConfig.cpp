@@ -31,7 +31,7 @@ bool loadConfig(AppConfig &c) {
   c.paceIndicatorGlow = prefs.getBool("pace_glow", false);
   c.verifyTls = prefs.getBool("tls", true);
   c.displayStyle = prefs.getUChar("ui_style", 0);
-  if (c.displayStyle > 1) c.displayStyle = 0;
+  if (c.displayStyle > 2) c.displayStyle = 0;
   c.displayAvailable = prefs.getBool("ui_remaining", false);
   c.displayOffEnabled = prefs.getBool("off_on", false);
   c.displayOffFromMinutes = prefs.getUShort("off_from", 22 * 60);

@@ -27,7 +27,7 @@ struct AppConfig {
   uint32_t paceIndicatorGlowColor = 0xFFFFFF;
   bool paceIndicatorGlow = false;
   bool verifyTls = true;
-  uint8_t displayStyle = 0;  // 0 = framed panels, 1 = open/frameless
+  uint8_t displayStyle = 0;
   bool displayAvailable = false;
   bool displayOffEnabled = false;
   uint16_t displayOffFromMinutes = 22 * 60;
