@@ -24,6 +24,7 @@ struct AppConfig {
   uint32_t warningColor = 0xF0A020;
   uint32_t backgroundColor = 0x000000;
   uint32_t paceIndicatorColor = 0xFFFFFF;
+  uint32_t paceIndicatorGlowColor = 0xFFFFFF;
   bool paceIndicatorGlow = false;
   bool verifyTls = true;
   uint8_t displayStyle = 0;  // 0 = framed panels, 1 = open/frameless
