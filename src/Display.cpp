@@ -371,7 +371,7 @@ static void renderMetric(uint8_t index) {
   if (window.elapsedPercent >= 0) {
     float elapsed = constrain(window.elapsedPercent, 0.0f, 100.0f);
     if (columnDesign) {
-      int markerPosition = barTops[index] + (barHeights[index] - 3) - (int)(elapsed * (barHeights[index] - 3) / 100.0f);
+      int markerPosition = barTops[index] + (int)(elapsed * (barHeights[index] - 3) / 100.0f);
       lv_obj_set_pos(paceMarkers[index], barOffsets[index] - 4, markerPosition);
     } else {
       float remaining = 100.0f - elapsed;
