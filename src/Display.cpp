@@ -49,6 +49,7 @@ static bool availableView = false;
 static uint8_t warningLevel = 70, criticalLevel = 90;
 static uint32_t overpaceColor = 0xDDF542, warningColor = 0xF0A020;
 static uint32_t paceIndicatorColor = 0xFFFFFF;
+static uint32_t paceIndicatorGlowColor = 0xFFFFFF;
 static bool paceIndicatorGlow = false;
 static uint32_t staleAfterSeconds = 390, lastStatusRefreshMs = 0;
 
@@ -440,7 +441,7 @@ static void makeUsageRow(lv_obj_t *parent, uint8_t index, int x, int y, int widt
   barWidths[index] = width; markerY[index] = 17;
   paceMarkers[index] = lv_obj_create(row); lv_obj_set_size(paceMarkers[index], 3, 11); lv_obj_set_pos(paceMarkers[index], 0, markerY[index]);
   lv_obj_set_style_bg_color(paceMarkers[index], C(paceIndicatorColor), 0); lv_obj_set_style_bg_opa(paceMarkers[index], LV_OPA_COVER, 0);
-  lv_obj_set_style_shadow_color(paceMarkers[index], C(paceIndicatorColor), 0);
+  lv_obj_set_style_shadow_color(paceMarkers[index], C(paceIndicatorGlowColor), 0);
   lv_obj_set_style_shadow_width(paceMarkers[index], paceIndicatorGlow ? 8 : 0, 0);
   lv_obj_set_style_shadow_spread(paceMarkers[index], paceIndicatorGlow ? 2 : 0, 0);
   lv_obj_set_style_shadow_opa(paceMarkers[index], paceIndicatorGlow ? LV_OPA_70 : LV_OPA_TRANSP, 0);
@@ -514,6 +515,7 @@ void displayBegin(const AppConfig &config) {
   overpaceColor = config.overpaceColor;
   warningColor = config.warningColor;
   paceIndicatorColor = config.paceIndicatorColor;
+  paceIndicatorGlowColor = config.paceIndicatorGlowColor;
   paceIndicatorGlow = config.paceIndicatorGlow;
   // Bring up the board's independent GT911 bus before the RGB peripheral.
   // This also gives a useful boot-time probe even if LVGL never sees a press.
