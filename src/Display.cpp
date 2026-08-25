@@ -52,6 +52,7 @@ static uint32_t paceIndicatorColor = 0xFFFFFF;
 static uint32_t paceIndicatorGlowColor = 0xFFFFFF;
 static bool paceIndicatorGlow = false;
 static bool telemetryDesign = false;
+static bool matrixDesign = false;
 static uint32_t staleAfterSeconds = 390, lastStatusRefreshMs = 0;
 
 static lv_color_t C(uint32_t value) { return lv_color_hex(value); }
@@ -441,13 +442,19 @@ bool displayToggleRemainingView() {
 
 static void makeUsageRow(lv_obj_t *parent, uint8_t index, int x, int y, int width, int height) {
   lv_obj_t *row = lv_obj_create(parent);
-  int rowHeight = telemetryDesign ? max(42, height - 2) : height;
-  int contentX = telemetryDesign ? 8 : 0;
+  int rowHeight = matrixDesign ? max(70, height - 6) : telemetryDesign ? max(42, height - 2) : height;
+  int contentX = (telemetryDesign || matrixDesign) ? 8 : 0;
   int contentWidth = width - contentX * 2;
   lv_obj_set_size(row, width, rowHeight); lv_obj_set_pos(row, x, y);
   lv_obj_set_style_bg_opa(row, LV_OPA_TRANSP, 0); lv_obj_set_style_border_width(row, 0, 0);
   lv_obj_set_style_pad_all(row, 0, 0); lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
-  if (telemetryDesign) {
+  if (matrixDesign) {
+    lv_obj_set_style_bg_color(row, C(index < 3 ? 0x0B1713 : 0x0D1420), 0);
+    lv_obj_set_style_bg_opa(row, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(row, 1, 0);
+    lv_obj_set_style_border_color(row, C(index < 3 ? 0x244D3F : 0x2C405A), 0);
+    lv_obj_set_style_radius(row, 10, 0);
+  } else if (telemetryDesign) {
     lv_obj_set_style_bg_color(row, C(index < 3 ? 0x0B2119 : 0x0D1725), 0);
     lv_obj_set_style_bg_opa(row, LV_OPA_40, 0);
     lv_obj_set_style_border_width(row, 1, 0);
@@ -455,14 +462,16 @@ static void makeUsageRow(lv_obj_t *parent, uint8_t index, int x, int y, int widt
     lv_obj_set_style_radius(row, 8, 0);
   }
   rows[index] = row;
-  lv_obj_t *name = label(row, rowNames[index].c_str(), &lv_font_montserrat_14, C(0xF2F2F2)); lv_obj_set_pos(name, contentX, telemetryDesign ? 1 : 0);
-  statusLabels[index] = label(row, "WAITING", &lv_font_montserrat_12, C(0x888888)); lv_obj_align(statusLabels[index], LV_ALIGN_TOP_RIGHT, -(78 + contentX), telemetryDesign ? 2 : 1);
-  values[index] = label(row, "--%", &lv_font_montserrat_20, C(0xF2F2F2)); lv_obj_align(values[index], LV_ALIGN_TOP_RIGHT, -contentX, telemetryDesign ? -2 : -3);
-  bars[index] = lv_bar_create(row); lv_obj_set_size(bars[index], contentWidth, telemetryDesign ? 9 : 7); lv_obj_set_pos(bars[index], contentX, telemetryDesign ? 20 : 19);
+  lv_obj_t *name = label(row, rowNames[index].c_str(), &lv_font_montserrat_14, C(0xF2F2F2)); lv_obj_set_pos(name, contentX, matrixDesign ? 7 : telemetryDesign ? 1 : 0);
+  statusLabels[index] = label(row, "WAITING", &lv_font_montserrat_12, C(0x888888));
+  if (matrixDesign) lv_obj_set_pos(statusLabels[index], contentX, 26);
+  else lv_obj_align(statusLabels[index], LV_ALIGN_TOP_RIGHT, -(78 + contentX), telemetryDesign ? 2 : 1);
+  values[index] = label(row, "--%", &lv_font_montserrat_20, C(0xF2F2F2)); lv_obj_align(values[index], LV_ALIGN_TOP_RIGHT, -contentX, matrixDesign ? 5 : telemetryDesign ? -2 : -3);
+  bars[index] = lv_bar_create(row); lv_obj_set_size(bars[index], contentWidth, matrixDesign ? 10 : telemetryDesign ? 9 : 7); lv_obj_set_pos(bars[index], contentX, matrixDesign ? 45 : telemetryDesign ? 20 : 19);
   lv_bar_set_range(bars[index], 0, 100); lv_obj_set_style_bg_color(bars[index], C(0x282828), LV_PART_MAIN);
   lv_obj_set_style_bg_opa(bars[index], LV_OPA_COVER, LV_PART_MAIN); lv_obj_set_style_radius(bars[index], 3, LV_PART_MAIN); lv_obj_set_style_radius(bars[index], 3, LV_PART_INDICATOR);
   lv_obj_clear_flag(bars[index], LV_OBJ_FLAG_CLICKABLE);
-  barWidths[index] = contentWidth; barOffsets[index] = contentX; markerY[index] = telemetryDesign ? 18 : 17;
+  barWidths[index] = contentWidth; barOffsets[index] = contentX; markerY[index] = matrixDesign ? 43 : telemetryDesign ? 18 : 17;
   paceMarkers[index] = lv_obj_create(row); lv_obj_set_size(paceMarkers[index], 3, 11); lv_obj_set_pos(paceMarkers[index], 0, markerY[index]);
   lv_obj_set_style_bg_color(paceMarkers[index], C(paceIndicatorColor), 0); lv_obj_set_style_bg_opa(paceMarkers[index], LV_OPA_COVER, 0);
   lv_obj_set_style_shadow_color(paceMarkers[index], C(paceIndicatorGlowColor), 0);
@@ -472,16 +481,26 @@ static void makeUsageRow(lv_obj_t *parent, uint8_t index, int x, int y, int widt
   lv_obj_set_style_border_width(paceMarkers[index], 0, 0); lv_obj_set_style_radius(paceMarkers[index], 1, 0); lv_obj_set_style_pad_all(paceMarkers[index], 0, 0);
   lv_obj_clear_flag(paceMarkers[index], LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE); lv_obj_add_flag(paceMarkers[index], LV_OBJ_FLAG_HIDDEN);
   resetLabels[index] = label(row, "Waiting for usage data", &lv_font_montserrat_12, C(0x929292));
-  lv_obj_set_pos(resetLabels[index], contentX, telemetryDesign ? max(31, rowHeight - 29) : max(30, height - 29));
+  if (matrixDesign) {
+    lv_obj_set_width(resetLabels[index], contentWidth);
+    lv_label_set_long_mode(resetLabels[index], LV_LABEL_LONG_WRAP);
+    lv_obj_set_pos(resetLabels[index], contentX, 60);
+  } else lv_obj_set_pos(resetLabels[index], contentX, telemetryDesign ? max(31, rowHeight - 29) : max(30, height - 29));
 }
 
 static void makePaceRow(lv_obj_t *parent, uint8_t provider, int x, int y, int width, int height) {
   lv_obj_t *row = lv_obj_create(parent);
-  int rowHeight = telemetryDesign ? max(42, height - 2) : height;
+  int rowHeight = matrixDesign ? max(70, height - 6) : telemetryDesign ? max(42, height - 2) : height;
   lv_obj_set_size(row, width, rowHeight); lv_obj_set_pos(row, x, y);
   lv_obj_set_style_bg_opa(row, LV_OPA_TRANSP, 0); lv_obj_set_style_border_width(row, 0, 0); lv_obj_set_style_pad_all(row, 0, 0);
   lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE); paceRows[provider] = row;
-  if (telemetryDesign) {
+  if (matrixDesign) {
+    lv_obj_set_style_bg_color(row, C(provider == 0 ? 0x0B1713 : 0x0D1420), 0);
+    lv_obj_set_style_bg_opa(row, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(row, 1, 0);
+    lv_obj_set_style_border_color(row, C(provider == 0 ? 0x244D3F : 0x2C405A), 0);
+    lv_obj_set_style_radius(row, 10, 0);
+  } else if (telemetryDesign) {
     lv_obj_set_style_bg_color(row, C(provider == 0 ? 0x0B2119 : 0x0D1725), 0);
     lv_obj_set_style_bg_opa(row, LV_OPA_40, 0);
     lv_obj_set_style_border_width(row, 1, 0);
@@ -489,15 +508,16 @@ static void makePaceRow(lv_obj_t *parent, uint8_t provider, int x, int y, int wi
     lv_obj_set_style_radius(row, 8, 0);
   }
   lv_obj_t *topLine = lv_obj_create(row); lv_obj_set_size(topLine, width, 1); lv_obj_set_pos(topLine, 0, 0);
-  lv_obj_set_style_bg_color(topLine, C(telemetryDesign ? (provider == 0 ? 0x35D078 : 0x7198C7) : 0x242424), 0); lv_obj_set_style_bg_opa(topLine, LV_OPA_COVER, 0); lv_obj_set_style_border_width(topLine, 0, 0); lv_obj_set_style_pad_all(topLine, 0, 0);
+  lv_obj_set_style_bg_color(topLine, C((telemetryDesign || matrixDesign) ? (provider == 0 ? 0x35D078 : 0x7198C7) : 0x242424), 0); lv_obj_set_style_bg_opa(topLine, LV_OPA_COVER, 0); lv_obj_set_style_border_width(topLine, 0, 0); lv_obj_set_style_pad_all(topLine, 0, 0);
   lv_obj_clear_flag(topLine, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
-  lv_obj_t *title = label(row, "LAST 30 MIN", &lv_font_montserrat_14, C(0xF2F2F2)); lv_obj_set_pos(title, telemetryDesign ? 8 : 0, 5);
-  paceValues[provider] = label(row, "WAITING", &lv_font_montserrat_14, C(0xF2F2F2)); lv_obj_align(paceValues[provider], LV_ALIGN_TOP_RIGHT, telemetryDesign ? -8 : 0, 5);
+  lv_obj_t *title = label(row, "LAST 30 MIN", &lv_font_montserrat_14, C(0xF2F2F2)); lv_obj_set_pos(title, (telemetryDesign || matrixDesign) ? 8 : 0, matrixDesign ? 9 : 5);
+  paceValues[provider] = label(row, "WAITING", &lv_font_montserrat_14, C(0xF2F2F2)); lv_obj_align(paceValues[provider], LV_ALIGN_TOP_RIGHT, (telemetryDesign || matrixDesign) ? -8 : 0, matrixDesign ? 9 : 5);
   paceMeta[provider] = label(row, provider == 0 ? "TOKENS / 6 x 5 MIN" : "WEEKLY CHANGE / 6 x 5 MIN", &lv_font_montserrat_12, C(0x929292));
-  lv_obj_set_pos(paceMeta[provider], telemetryDesign ? 8 : 0, rowHeight - 18);
-  int chartWidth = 142, gap = 4, columnWidth = (chartWidth - gap * 5) / 6, chartX = width - chartWidth;
-  paceChartBaseline[provider] = rowHeight - 6;
-  paceChartMaxHeight[provider] = constrain(rowHeight - 32, 16, 46);
+  lv_obj_set_pos(paceMeta[provider], (telemetryDesign || matrixDesign) ? 8 : 0, matrixDesign ? 32 : rowHeight - 18);
+  int chartWidth = matrixDesign ? width - 16 : 142, gap = 4, columnWidth = (chartWidth - gap * 5) / 6;
+  int chartX = matrixDesign ? 8 : width - chartWidth;
+  paceChartBaseline[provider] = rowHeight - (matrixDesign ? 8 : 6);
+  paceChartMaxHeight[provider] = constrain(rowHeight - (matrixDesign ? 58 : 32), 16, 46);
   for (uint8_t i = 0; i < 6; ++i) {
     paceColumns[provider][i] = lv_obj_create(row);
     lv_obj_set_size(paceColumns[provider][i], columnWidth, 2); lv_obj_set_pos(paceColumns[provider][i], chartX + i * (columnWidth + gap), paceChartBaseline[provider] - 2);
@@ -546,9 +566,45 @@ static lv_obj_t *makeProviderPanel(const char *title, uint8_t provider, int y, i
   return panel;
 }
 
+static lv_obj_t *makeMatrixPanel(const char *title, uint8_t provider, int x, int y, int width, int height, int &innerX, int &innerWidth) {
+  lv_obj_t *panel = lv_obj_create(lv_scr_act());
+  lv_obj_set_size(panel, width, height); lv_obj_set_pos(panel, x, y);
+  lv_obj_set_style_bg_color(panel, C(provider == 0 ? 0x050B08 : 0x060912), 0);
+  lv_obj_set_style_bg_opa(panel, LV_OPA_COVER, 0);
+  lv_obj_set_style_border_width(panel, 0, 0); lv_obj_set_style_radius(panel, 12, 0); lv_obj_set_style_pad_all(panel, 0, 0);
+  lv_obj_clear_flag(panel, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+  innerX = 7; innerWidth = width - 14;
+  lv_obj_t *rail = lv_obj_create(panel); lv_obj_set_size(rail, 4, 24); lv_obj_set_pos(rail, 0, 5);
+  lv_obj_set_style_bg_color(rail, C(provider == 0 ? 0x35D078 : 0x7198C7), 0); lv_obj_set_style_bg_opa(rail, LV_OPA_COVER, 0);
+  lv_obj_set_style_border_width(rail, 0, 0); lv_obj_set_style_radius(rail, 2, 0); lv_obj_set_style_pad_all(rail, 0, 0);
+  lv_obj_clear_flag(rail, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_t *providerIcon = lv_img_create(panel);
+  lv_img_set_src(providerIcon, provider == 0 ? &cursorProviderIcon : &codexProviderIcon);
+  lv_obj_set_pos(providerIcon, 10, 8); lv_obj_clear_flag(providerIcon, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+  if (provider == 0) {
+    lv_obj_set_style_img_recolor(providerIcon, C(0xFFFFFF), 0);
+    lv_obj_set_style_img_recolor_opa(providerIcon, 180, 0);
+  }
+  lv_obj_t *heading = label(panel, title, &lv_font_montserrat_20, C(0xFFFFFF)); lv_obj_set_pos(heading, 35, 5);
+  providerPlanLabels[provider] = label(panel, "", &lv_font_montserrat_12, C(0xD7FBEF));
+  lv_obj_set_pos(providerPlanLabels[provider], provider == 0 ? 112 : 103, 7);
+  lv_obj_set_style_bg_color(providerPlanLabels[provider], C(provider == 0 ? 0x173D33 : 0x1A3047), 0); lv_obj_set_style_bg_opa(providerPlanLabels[provider], LV_OPA_COVER, 0);
+  lv_obj_set_style_pad_left(providerPlanLabels[provider], 5, 0); lv_obj_set_style_pad_right(providerPlanLabels[provider], 5, 0);
+  lv_obj_set_style_pad_top(providerPlanLabels[provider], 2, 0); lv_obj_set_style_pad_bottom(providerPlanLabels[provider], 2, 0);
+  lv_obj_set_style_radius(providerPlanLabels[provider], 7, 0); lv_obj_add_flag(providerPlanLabels[provider], LV_OBJ_FLAG_HIDDEN);
+  providerStatusLabels[provider] = label(panel, "WAITING", &lv_font_montserrat_12, C(0x888888));
+  lv_obj_set_pos(providerStatusLabels[provider], 10, 30);
+  lv_obj_t *divider = lv_obj_create(panel); lv_obj_set_size(divider, width - 20, 1); lv_obj_set_pos(divider, 10, 47);
+  lv_obj_set_style_bg_color(divider, C(provider == 0 ? 0x244D3F : 0x2C405A), 0); lv_obj_set_style_bg_opa(divider, LV_OPA_COVER, 0);
+  lv_obj_set_style_border_width(divider, 0, 0); lv_obj_set_style_pad_all(divider, 0, 0);
+  lv_obj_clear_flag(divider, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+  return panel;
+}
+
 void displayBegin(const AppConfig &config) {
   availableView = config.displayAvailable;
   telemetryDesign = config.displayStyle == 2;
+  matrixDesign = config.displayStyle == 3;
   overpaceColor = config.overpaceColor;
   warningColor = config.warningColor;
   paceIndicatorColor = config.paceIndicatorColor;
@@ -570,7 +626,8 @@ void displayBegin(const AppConfig &config) {
 
   lv_obj_set_style_bg_color(lv_scr_act(), C(config.backgroundColor), 0); lv_obj_set_style_bg_opa(lv_scr_act(), LV_OPA_COVER, 0);
   lv_obj_add_flag(lv_scr_act(), LV_OBJ_FLAG_CLICKABLE);
-  lv_obj_t *title = label(lv_scr_act(), telemetryDesign ? "AI TELEMETRY" : "AI USAGE", &lv_font_montserrat_20, C(0xFFFFFF)); lv_obj_set_pos(title, 16, 5);
+  const char *dashboardTitle = matrixDesign ? "USAGE MATRIX" : telemetryDesign ? "AI TELEMETRY" : "AI USAGE";
+  lv_obj_t *title = label(lv_scr_act(), dashboardTitle, &lv_font_montserrat_20, C(0xFFFFFF)); lv_obj_set_pos(title, 16, 5);
   modeLabel = label(lv_scr_act(), "USED", &lv_font_montserrat_12, C(0xFFFFFF)); lv_obj_align(modeLabel, LV_ALIGN_TOP_MID, 0, 11);
   networkLabel = label(lv_scr_act(), "STARTING", &lv_font_montserrat_12, C(0xF2A93B)); lv_obj_align(networkLabel, LV_ALIGN_TOP_RIGHT, -16, 11);
 
@@ -582,6 +639,44 @@ void displayBegin(const AppConfig &config) {
   bool codexPaceVisible = config.showCodexThirtyMinute;
   uint8_t cursorUnits = cursorCount + (cursorPaceVisible ? 1 : 0);
   uint8_t codexUnits = codexCount + (codexPaceVisible ? 1 : 0);
+  if (matrixDesign) {
+    constexpr int matrixTop = 34, matrixHeight = 444, matrixGap = 6, matrixHeader = 50;
+    bool twoColumns = cursorUnits && codexUnits;
+    int panelWidth = twoColumns ? 231 : 468;
+    int cursorX = 6, codexX = twoColumns ? cursorX + panelWidth + matrixGap : 6;
+    int matrixInnerX, matrixInnerWidth;
+    if (cursorUnits) {
+      lv_obj_t *cursorPanel = makeMatrixPanel("CURSOR", 0, cursorX, matrixTop, panelWidth, matrixHeight, matrixInnerX, matrixInnerWidth);
+      int availableHeight = matrixHeight - matrixHeader;
+      int matrixUnit = availableHeight / cursorUnits;
+      int matrixExtra = availableHeight - matrixUnit * cursorUnits;
+      int rowY = matrixHeader;
+      uint8_t made = 0;
+      for (uint8_t i = 0; i < 3; ++i) if (visible[i]) {
+        made++;
+        int height = matrixUnit + (!cursorPaceVisible && made == cursorCount ? matrixExtra : 0);
+        makeUsageRow(cursorPanel, i, matrixInnerX, rowY, matrixInnerWidth, height); rowY += height;
+      }
+      if (cursorPaceVisible) makePaceRow(cursorPanel, 0, matrixInnerX, rowY, matrixInnerWidth, matrixUnit + matrixExtra);
+    }
+    if (codexUnits) {
+      lv_obj_t *codexPanel = makeMatrixPanel("CODEX", 1, codexX, matrixTop, panelWidth, matrixHeight, matrixInnerX, matrixInnerWidth);
+      int availableHeight = matrixHeight - matrixHeader;
+      int matrixUnit = availableHeight / codexUnits;
+      int matrixExtra = availableHeight - matrixUnit * codexUnits;
+      int rowY = matrixHeader;
+      uint8_t made = 0;
+      for (uint8_t i = 3; i < 5; ++i) if (visible[i]) {
+        made++;
+        int height = matrixUnit + (!codexPaceVisible && made == codexCount ? matrixExtra : 0);
+        makeUsageRow(codexPanel, i, matrixInnerX, rowY, matrixInnerWidth, height); rowY += height;
+      }
+      if (codexPaceVisible) makePaceRow(codexPanel, 1, matrixInnerX, rowY, matrixInnerWidth, matrixUnit + matrixExtra);
+    }
+    Serial.printf("[display] Matrix layout: Cursor units=%u, Codex units=%u, columns=%u\n", cursorUnits, codexUnits, twoColumns ? 2 : 1);
+    renderAll();
+    return;
+  }
   uint8_t panelCount = (cursorUnits ? 1 : 0) + (codexUnits ? 1 : 0);
   uint8_t totalUnits = cursorUnits + codexUnits;
   constexpr int panelHeader = 32, panelGap = 4, dashboardTop = 34, dashboardBottom = 478;
