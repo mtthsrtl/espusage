@@ -376,6 +376,7 @@ static void renderMetric(uint8_t index) {
   if (used < 0 && networkAddress.length() && (rowStatus[index] == "disabled" || rowStatus[index].indexOf("missing") >= 0))
     bottom = "Setup: http://" + networkAddress;
   lv_label_set_text(resetLabels[index], bottom.c_str());
+  lv_obj_align(resetLabels[index], LV_ALIGN_TOP_MID, 0, 1);
 }
 
 static void renderPace(uint8_t provider) {
@@ -461,10 +462,7 @@ static void makeUsageRow(lv_obj_t *parent, uint8_t index, int x, int y, int widt
   lv_obj_set_style_border_width(paceMarkers[index], 0, 0); lv_obj_set_style_radius(paceMarkers[index], 1, 0); lv_obj_set_style_pad_all(paceMarkers[index], 0, 0);
   lv_obj_clear_flag(paceMarkers[index], LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE); lv_obj_add_flag(paceMarkers[index], LV_OBJ_FLAG_HIDDEN);
   resetLabels[index] = label(row, "Waiting for usage data", &lv_font_montserrat_12, C(0x929292));
-  // Keep the reset text visually attached to its own bar. The remaining row
-  // height becomes a clear gap before the next metric instead of making the
-  // reset look like a subtitle for the row below.
-  lv_obj_set_pos(resetLabels[index], 0, max(30, height - 29));
+  lv_obj_align(resetLabels[index], LV_ALIGN_TOP_MID, 0, 1);
 }
 
 static void makePaceRow(lv_obj_t *parent, uint8_t provider, int x, int y, int width, int height) {
@@ -578,11 +576,13 @@ void displayBegin(const AppConfig &config) {
     int rowY = panelHeader;
     uint8_t made = 0;
     int cursorExtra = !codexUnits ? max(0, remainder) : 0;
+    int usageArea = cursorCount * unitHeight + (!cursorPaceVisible ? cursorExtra : 0);
+    int rowStep = cursorCount > 1 ? min(58, max(30, (usageArea - 30) / (cursorCount - 1))) : 0;
     for (uint8_t i = 0; i < 3; ++i) if (visible[i]) {
+      makeUsageRow(cursorPanel, i, innerX, panelHeader + made * rowStep, innerWidth, 30);
       made++;
-      int height = unitHeight + (!cursorPaceVisible && made == cursorCount ? cursorExtra : 0);
-      makeUsageRow(cursorPanel, i, innerX, rowY, innerWidth, height); rowY += height;
     }
+    rowY = panelHeader + usageArea;
     if (cursorPaceVisible) makePaceRow(cursorPanel, 0, innerX, rowY, innerWidth, unitHeight + cursorExtra);
     y += cursorHeight + 4;
   }
@@ -590,12 +590,15 @@ void displayBegin(const AppConfig &config) {
     lv_obj_t *codexPanel = makeProviderPanel("CODEX", 1, y, codexHeight, flat, innerX, innerWidth);
     int rowY = panelHeader;
     uint8_t made = 0;
+    int codexExtra = max(0, remainder);
+    int usageArea = codexCount * unitHeight + (!codexPaceVisible ? codexExtra : 0);
+    int rowStep = codexCount > 1 ? min(58, max(30, (usageArea - 30) / (codexCount - 1))) : 0;
     for (uint8_t i = 3; i < 5; ++i) if (visible[i]) {
+      makeUsageRow(codexPanel, i, innerX, panelHeader + made * rowStep, innerWidth, 30);
       made++;
-      int height = unitHeight + (!codexPaceVisible && made == codexCount ? max(0, remainder) : 0);
-      makeUsageRow(codexPanel, i, innerX, rowY, innerWidth, height); rowY += height;
     }
-    if (codexPaceVisible) makePaceRow(codexPanel, 1, innerX, rowY, innerWidth, unitHeight + max(0, remainder));
+    rowY = panelHeader + usageArea;
+    if (codexPaceVisible) makePaceRow(codexPanel, 1, innerX, rowY, innerWidth, unitHeight + codexExtra);
   }
   Serial.printf("[display] Layout: Cursor units=%u, Codex units=%u, row=%dpx, bottom=%d\n",
                 cursorUnits, codexUnits, unitHeight, y + codexHeight);
