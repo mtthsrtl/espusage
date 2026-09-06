@@ -166,11 +166,13 @@ Tested with PlatformIO `espressif32@6.12.0`, Arduino-ESP32 2.0.17, Arduino_GFX 1
 | `/api/wifi` | DELETE | Delete Wi-Fi credentials and restart in setup mode |
 | `/api/ota` | POST | Upload an application `firmware.bin` |
 
-To copy the credentials from the local Codex and Cursor installations to a device, run:
+To select interactively whether Codex, Cursor, or both should be read from the local installations and updated on the device, run:
 
 ```powershell
-.\tools\update-local-tokens.ps1 -DeviceUrl http://192.168.178.123 -ApiKey "your-private-api-key"
+.\tools\update-local-tokens.ps1
 ```
+
+For unattended use, pass `-Provider Codex`, `-Provider Cursor`, or `-Provider Both` and provide the API key with `-ApiKey` or the `ESPUSAGE_TOKEN_API_KEY` environment variable.
 
 Set the token webhook API key once in the General web settings. Because the device serves plain HTTP, use this only on a trusted local network and do not expose the endpoint through port forwarding.
 
