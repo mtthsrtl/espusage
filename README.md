@@ -172,7 +172,7 @@ To select interactively whether Codex, Cursor, or both should be read from the l
 .\tools\update-local-tokens.ps1
 ```
 
-For unattended use, pass `-Provider Codex`, `-Provider Cursor`, or `-Provider Both` and provide the API key with `-ApiKey` or the `ESPUSAGE_TOKEN_API_KEY` environment variable.
+For unattended use, pass `-Provider Codex`, `-Provider Cursor`, or `-Provider Both`. The API key can be entered in `$TokenWebhookApiKey` near the top of the script, supplied with `-ApiKey`, or set through the `ESPUSAGE_TOKEN_API_KEY` environment variable. Do not commit a real key to a public repository.
 
 Set the token webhook API key once in the General web settings. Because the device serves plain HTTP, use this only on a trusted local network and do not expose the endpoint through port forwarding.
 

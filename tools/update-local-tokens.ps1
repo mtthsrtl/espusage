@@ -2,8 +2,12 @@ param(
     [string]$DeviceUrl = "http://192.168.178.123",
     [ValidateSet("Codex", "Cursor", "Both")]
     [string]$Provider,
-    [string]$ApiKey = $env:ESPUSAGE_TOKEN_API_KEY
+    [string]$ApiKey
 )
+
+# Optional: enter the same key configured as "Token webhook API key" in the web UI.
+# Keep this empty in commits if the repository is public.
+$TokenWebhookApiKey = ""
 
 $ErrorActionPreference = "Stop"
 $DeviceUrl = $DeviceUrl.TrimEnd("/")
@@ -22,6 +26,12 @@ if ([string]::IsNullOrWhiteSpace($Provider)) {
     }
 }
 
+if ([string]::IsNullOrWhiteSpace($ApiKey)) {
+    $ApiKey = $TokenWebhookApiKey
+}
+if ([string]::IsNullOrWhiteSpace($ApiKey)) {
+    $ApiKey = $env:ESPUSAGE_TOKEN_API_KEY
+}
 if ([string]::IsNullOrWhiteSpace($ApiKey)) {
     $secureApiKey = Read-Host "Token webhook API key" -AsSecureString
     $ApiKey = [System.Net.NetworkCredential]::new("", $secureApiKey).Password
