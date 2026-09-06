@@ -16,6 +16,7 @@ struct AppConfig {
   String hostname = "espusage";
   ProviderConfig codex;
   ProviderConfig cursor;
+  String tokenApiKey;
   bool codexCreditsFallback = false;
   uint8_t brightness = 85;
   uint16_t refreshMinutes = 5;

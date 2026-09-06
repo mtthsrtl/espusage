@@ -156,6 +156,7 @@ Tested with PlatformIO `espressif32@6.12.0`, Arduino-ESP32 2.0.17, Arduino_GFX 1
 | `/api/status` | GET | Redacted runtime/debug status |
 | `/api/usage` | GET | Current sanitized provider limits and 30-minute buckets; does not intentionally include stored secrets |
 | `/api/usage/refresh` | GET/POST | Queue an immediate refresh of Codex and Cursor limits |
+| `/api/tokens` | POST | Update supplied Codex/Cursor credentials in NVS using the configured API key and queue an immediate usage refresh; response never includes credential values |
 | `/api/touch` | GET | Live I²C, GT911, coordinate, and gesture diagnostics; does not intentionally include stored secrets |
 | `/api/display?mode=toggle\|used\|remaining` | GET | Change the displayed usage mode |
 | `/api/display/toggle` | GET/POST | Toggle the physical display backlight and return its new state |
@@ -164,6 +165,14 @@ Tested with PlatformIO `espressif32@6.12.0`, Arduino-ESP32 2.0.17, Arduino_GFX 1
 | `/api/wifi` | POST | Save selected Wi-Fi credentials and restart |
 | `/api/wifi` | DELETE | Delete Wi-Fi credentials and restart in setup mode |
 | `/api/ota` | POST | Upload an application `firmware.bin` |
+
+To copy the credentials from the local Codex and Cursor installations to a device, run:
+
+```powershell
+.\tools\update-local-tokens.ps1 -DeviceUrl http://192.168.178.123 -ApiKey "your-private-api-key"
+```
+
+Set the token webhook API key once in the General web settings. Because the device serves plain HTTP, use this only on a trusted local network and do not expose the endpoint through port forwarding.
 
 ## License
 
