@@ -36,6 +36,8 @@ bool loadConfig(AppConfig &c) {
   if (c.displayStyle > 4) c.displayStyle = 0;
   c.displayAvailable = prefs.getBool("ui_remaining", false);
   c.displayOffEnabled = prefs.getBool("off_on", false);
+  c.automaticRebootEnabled = prefs.getBool("reboot_on", false);
+  c.automaticRebootHours = constrain(prefs.getUShort("reboot_hours", 2), (uint16_t)1, (uint16_t)168);
   c.displayOffFromMinutes = prefs.getUShort("off_from", 22 * 60);
   c.displayOffUntilMinutes = prefs.getUShort("off_until", 7 * 60);
   if (c.displayOffFromMinutes > 1439) c.displayOffFromMinutes = 22 * 60;
@@ -81,6 +83,8 @@ bool saveConfig(const AppConfig &c) {
   prefs.putUChar("ui_style", c.displayStyle);
   prefs.putBool("ui_remaining", c.displayAvailable);
   prefs.putBool("off_on", c.displayOffEnabled);
+  prefs.putBool("reboot_on", c.automaticRebootEnabled);
+  prefs.putUShort("reboot_hours", constrain(c.automaticRebootHours, (uint16_t)1, (uint16_t)168));
   prefs.putUShort("off_from", c.displayOffFromMinutes > 1439 ? 1439 : c.displayOffFromMinutes);
   prefs.putUShort("off_until", c.displayOffUntilMinutes > 1439 ? 1439 : c.displayOffUntilMinutes);
   prefs.putBool("show_cur_main", c.showCursorModels); prefs.putBool("show_cur_other", c.showCursorOther);

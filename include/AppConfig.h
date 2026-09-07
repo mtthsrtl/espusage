@@ -32,6 +32,8 @@ struct AppConfig {
   uint8_t displayStyle = 0;
   bool displayAvailable = false;
   bool displayOffEnabled = false;
+  bool automaticRebootEnabled = false;
+  uint16_t automaticRebootHours = 2;
   uint16_t displayOffFromMinutes = 22 * 60;
   uint16_t displayOffUntilMinutes = 7 * 60;
   bool showCursorModels = true;
