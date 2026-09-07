@@ -16,6 +16,7 @@ static String startupNetworkText="STARTING"; static bool startupNetworkConnected
 static constexpr const char *DISPLAY_TIMEZONE = "CET-1CEST,M3.5.0/2,M10.5.0/3";
 static bool displayScheduledOff = false, displayClockWarningLogged = false;
 static uint32_t displayWakeUntilMs = 0;
+static uint32_t nextAutomaticRebootMs = 0;
 
 struct CodexPaceBucket { uint32_t slot = 0; float delta = 0; bool valid = false; };
 static CodexPaceBucket codexPace[6];
@@ -41,6 +42,21 @@ static void ensureCleanPeripheralBoot() {
 static void requestUsageRefresh() {
   usageRefreshRequested = true;
   Serial.println("[usage][webhook] Immediate refresh requested");
+}
+
+static void updateAutomaticReboot() {
+  if (!config.automaticRebootEnabled) { nextAutomaticRebootMs = 0; return; }
+  uint32_t intervalMs = (uint32_t)config.automaticRebootHours * 3600000UL;
+  if (!nextAutomaticRebootMs) {
+    nextAutomaticRebootMs = millis() + intervalMs;
+    Serial.printf("[system][timer] Automatic reboot scheduled every %u hour(s)\n", config.automaticRebootHours);
+    return;
+  }
+  if ((int32_t)(millis() - nextAutomaticRebootMs) < 0) return;
+  Serial.println("[system][timer] Automatic reboot interval reached");
+  Serial.flush();
+  delay(50);
+  ESP.restart();
 }
 
 static void clearCodexPace() {
@@ -199,7 +215,7 @@ static bool connectWifi(){
 }
 void setup(){Serial.begin(115200);delay(300);Serial.println("\n[boot] ESP Usage starting");ensureCleanPeripheralBoot();loadConfig(config);Serial.printf("[config][nvs] Cursor: enabled=%s, token=%s\n",config.cursor.enabled?"yes":"no",config.cursor.token.length()?"stored":"missing");Serial.printf("[config][nvs] Codex: enabled=%s, access_token=%s, account_id=%s, mode=%s\n",config.codex.enabled?"yes":"no",config.codex.token.length()?"stored":"missing",config.codex.accountId.length()?"stored":"missing",config.codex.endpoint.length()?"adapter":"direct");Serial.printf("[config][nvs] Display off time: %s, %02u:%02u-%02u:%02u Europe/Berlin\n",config.displayOffEnabled?"enabled":"disabled",config.displayOffFromMinutes/60,config.displayOffFromMinutes%60,config.displayOffUntilMinutes/60,config.displayOffUntilMinutes%60);bool connected=connectWifi();displayBegin(config);displaySetBrightness(config.brightness);displaySetNetwork(startupNetworkText,startupNetworkConnected);webBegin(config,!connected,requestUsageRefresh);Serial.println("[boot] Web portal ready");}
 void loop(){
-  displayLoop(); webLoop(); updateDisplayPower();
+  displayLoop(); webLoop(); updateDisplayPower(); updateAutomaticReboot();
   if(WiFi.status()==WL_CONNECTED&&(usageRefreshRequested||lastFetch==0||millis()-lastFetch>(uint32_t)config.refreshMinutes*60000UL)){
     usageRefreshRequested=false; lastFetch=millis(); Serial.println("[usage] Refreshing Codex and Cursor");
     UsageSnapshot freshCodex=codex.fetch(config.codex,config.verifyTls);
