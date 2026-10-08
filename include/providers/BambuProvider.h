@@ -22,6 +22,13 @@ struct BambuStatus {
   int stageId = -1;
   int partFanPercent = -1;
   int auxFanPercent = -1;
+  int wifiRssi = 0;
+  bool wifiSignalValid = false;
+  float refreshHz = -1;
+  uint32_t refreshIntervalMs = 0;
+  uint32_t lastMessageMs = 0;
+  String wifiSignal;
+  String linkQuality;
   String stage;
   String fileName;
   String filament;
@@ -57,5 +64,6 @@ class BambuClient {
   bool authDirty = false;
   uint32_t lastConnectAttemptMs = 0;
   uint32_t lastPushAllMs = 0;
+  uint32_t lastReportMs = 0;
   String clientId;
 };

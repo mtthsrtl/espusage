@@ -36,6 +36,25 @@ static int readFanField(JsonVariantConst value) {
   return fanToPercent(value.as<int>());
 }
 
+static int parseWifiRssi(const String &signal) {
+  String digits;
+  digits.reserve(signal.length());
+  for (size_t i = 0; i < signal.length(); i++) {
+    char c = signal[i];
+    if (c == '-' || (c >= '0' && c <= '9')) digits += c;
+  }
+  if (!digits.length()) return 0;
+  return digits.toInt();
+}
+
+static const char *wifiQualityLabel(int rssi) {
+  if (rssi >= -50) return "EXCELLENT";
+  if (rssi >= -60) return "GOOD";
+  if (rssi >= -70) return "FAIR";
+  if (rssi >= -80) return "WEAK";
+  return "POOR";
+}
+
 static const char *stageLabel(int stageId) {
   switch (stageId) {
     case 0: return "PRINTING";
@@ -168,6 +187,9 @@ void BambuClient::disconnect() {
   tlsClient.stop();
   if (activeClient == this) activeClient = nullptr;
   latest.connected = false;
+  lastReportMs = 0;
+  latest.refreshHz = -1;
+  latest.refreshIntervalMs = 0;
 }
 
 void BambuClient::requestPushAll() {
@@ -484,6 +506,7 @@ void BambuClient::handleMessage(const char *topic, const uint8_t *payload, unsig
   printFilter["stg_cur"] = true;
   printFilter["cooling_fan_speed"] = true;
   printFilter["big_fan1_speed"] = true;
+  printFilter["wifi_signal"] = true;
   printFilter["gcode_file"] = true;
   printFilter["subtask_name"] = true;
   printFilter["command"] = true;
@@ -515,6 +538,24 @@ void BambuClient::handleMessage(const char *topic, const uint8_t *payload, unsig
   if (partFan >= 0) latest.partFanPercent = partFan;
   int auxFan = readFanField(print["big_fan1_speed"]);
   if (auxFan >= 0) latest.auxFanPercent = auxFan;
+
+  if (print["wifi_signal"].is<const char *>()) {
+    latest.wifiSignal = print["wifi_signal"].as<const char *>();
+    latest.wifiRssi = parseWifiRssi(latest.wifiSignal);
+    latest.wifiSignalValid = latest.wifiSignal.length() > 0;
+    if (latest.wifiSignalValid) latest.linkQuality = wifiQualityLabel(latest.wifiRssi);
+  }
+
+  uint32_t now = millis();
+  if (lastReportMs > 0) {
+    uint32_t gap = now - lastReportMs;
+    if (gap < 1) gap = 1;
+    if (latest.refreshIntervalMs == 0) latest.refreshIntervalMs = gap;
+    else latest.refreshIntervalMs = (latest.refreshIntervalMs * 3 + gap) / 4;
+    latest.refreshHz = 1000.0f / (float)latest.refreshIntervalMs;
+  }
+  lastReportMs = now;
+  latest.lastMessageMs = now;
 
   if (print["subtask_name"].is<const char *>()) latest.fileName = basenameOf(print["subtask_name"].as<const char *>());
   else if (print["gcode_file"].is<const char *>()) latest.fileName = basenameOf(print["gcode_file"].as<const char *>());

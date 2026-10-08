@@ -57,6 +57,7 @@ static lv_obj_t *printPercentBar = nullptr, *printLayerBar = nullptr;
 static lv_obj_t *printNozzleBar = nullptr, *printBedBar = nullptr, *printNozzleTargetMarker = nullptr;
 static lv_obj_t *printPartFanBar = nullptr, *printAuxFanBar = nullptr;
 static lv_obj_t *printModeLabel = nullptr, *printNetworkLabel = nullptr;
+static lv_obj_t *printWifiLabel = nullptr, *printQualityLabel = nullptr, *printRefreshLabel = nullptr;
 static constexpr int PRINT_NOZZLE_BAR_X = 20, PRINT_NOZZLE_BAR_Y = 306, PRINT_NOZZLE_BAR_W = 200, PRINT_NOZZLE_BAR_H = 14;
 static constexpr int PRINT_NOZZLE_TEMP_MAX = 250;
 static uint8_t warningLevel = 70, criticalLevel = 90;
@@ -536,6 +537,13 @@ static void buildPrintScreen(uint32_t bg) {
   printAuxFanLabel = label(printScreen, "--%", &lv_font_montserrat_16, C(0xF2F2F2));
   lv_obj_set_pos(printAuxFanLabel, 250, 358);
   printAuxFanBar = makePrintBar(printScreen, 250, 382, 210, 14, 0x7AA2F7);
+
+  printWifiLabel = label(printScreen, "WIFI --", &lv_font_montserrat_12, C(0xA0A8B4));
+  lv_obj_set_pos(printWifiLabel, 20, 448);
+  printQualityLabel = label(printScreen, "LINK --", &lv_font_montserrat_12, C(0xA0A8B4));
+  lv_obj_align(printQualityLabel, LV_ALIGN_BOTTOM_MID, 0, -16);
+  printRefreshLabel = label(printScreen, "REF --", &lv_font_montserrat_12, C(0xA0A8B4));
+  lv_obj_align(printRefreshLabel, LV_ALIGN_BOTTOM_RIGHT, -20, -16);
 }
 
 static void toggleView() {
@@ -1117,6 +1125,33 @@ void displayUpdatePrint(const BambuStatus &status) {
   }
   if (printPartFanBar) lv_bar_set_value(printPartFanBar, status.partFanPercent >= 0 ? status.partFanPercent : 0, LV_ANIM_OFF);
   if (printAuxFanBar) lv_bar_set_value(printAuxFanBar, status.auxFanPercent >= 0 ? status.auxFanPercent : 0, LV_ANIM_OFF);
+  if (printWifiLabel) {
+    String wifi = "WIFI --";
+    if (status.wifiSignalValid) {
+      if (status.wifiSignal.length()) wifi = "WIFI " + status.wifiSignal;
+      else wifi = "WIFI " + String(status.wifiRssi) + "dBm";
+    }
+    lv_label_set_text(printWifiLabel, wifi.c_str());
+  }
+  if (printQualityLabel) {
+    String quality = status.linkQuality.length() ? ("LINK " + status.linkQuality) : "LINK --";
+    uint32_t color = 0xA0A8B4;
+    if (status.linkQuality == "EXCELLENT" || status.linkQuality == "GOOD") color = 0x35D078;
+    else if (status.linkQuality == "FAIR") color = 0xF0A020;
+    else if (status.linkQuality == "WEAK" || status.linkQuality == "POOR") color = 0xE06C75;
+    lv_label_set_text(printQualityLabel, quality.c_str());
+    lv_obj_set_style_text_color(printQualityLabel, C(color), 0);
+  }
+  if (printRefreshLabel) {
+    String refresh = "REF --";
+    if (status.refreshIntervalMs > 0) {
+      if (status.refreshHz >= 1.0f) refresh = "REF " + String(status.refreshHz, 1) + " Hz";
+      else refresh = "REF " + String(status.refreshIntervalMs / 1000.0f, 1) + "s";
+    } else if (status.connected) {
+      refresh = "REF WAIT";
+    }
+    lv_label_set_text(printRefreshLabel, refresh.c_str());
+  }
   if (activeScreen == DisplayScreen::Print) {
     lv_obj_invalidate(printScreen);
     lv_refr_now(nullptr);
