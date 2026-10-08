@@ -46,6 +46,19 @@ static void requestUsageRefresh() {
   Serial.println("[usage][webhook] Immediate refresh requested");
 }
 
+static void handleBambuSessionApplied() {
+  bambu.configure(config.bambu);
+  Serial.printf("[bambu][session] Applied cloud session user=%s serial=%s token=%s\n",
+                config.bambu.userId.c_str(), config.bambu.serial.c_str(),
+                config.bambu.cloudToken.length() ? "stored" : "missing");
+  if (displayGetScreen() == DisplayScreen::Print) {
+    bambu.setActive(true);
+    BambuStatus status = bambu.snapshot();
+    displayUpdatePrint(status);
+    webUpdatePrint(status);
+  }
+}
+
 static bool handleViewChange(const char *screen) {
   DisplayScreen current = displayGetScreen();
   DisplayScreen target = current;
@@ -244,7 +257,7 @@ static bool connectWifi(){
     Serial.println("[wifi][setup] Falling back to recovery portal");startRecoveryAp("ESPUsage-Setup");return false;
   }
 }
-void setup(){Serial.begin(115200);delay(300);Serial.println("\n[boot] ESP Usage starting");ensureCleanPeripheralBoot();loadConfig(config);Serial.printf("[config][nvs] Cursor: enabled=%s, token=%s\n",config.cursor.enabled?"yes":"no",config.cursor.token.length()?"stored":"missing");Serial.printf("[config][nvs] Codex: enabled=%s, access_token=%s, account_id=%s, mode=%s\n",config.codex.enabled?"yes":"no",config.codex.token.length()?"stored":"missing",config.codex.accountId.length()?"stored":"missing",config.codex.endpoint.length()?"adapter":"direct");Serial.printf("[config][nvs] Bambu: enabled=%s, mode=%s, serial=%s\n",config.bambu.enabled?"yes":"no",config.bambu.mode==1?"cloud":"local",config.bambu.serial.c_str());Serial.printf("[config][nvs] Display off time: %s, %02u:%02u-%02u:%02u Europe/Berlin\n",config.displayOffEnabled?"enabled":"disabled",config.displayOffFromMinutes/60,config.displayOffFromMinutes%60,config.displayOffUntilMinutes/60,config.displayOffUntilMinutes%60);bool connected=connectWifi();displayBegin(config);displaySetBrightness(config.brightness);displaySetNetwork(startupNetworkText,startupNetworkConnected);bambu.configure(config.bambu);bambu.setActive(false);webBegin(config,!connected,requestUsageRefresh,handleViewChange);Serial.println("[boot] Web portal ready");}
+void setup(){Serial.begin(115200);delay(300);Serial.println("\n[boot] ESP Usage starting");ensureCleanPeripheralBoot();loadConfig(config);Serial.printf("[config][nvs] Cursor: enabled=%s, token=%s\n",config.cursor.enabled?"yes":"no",config.cursor.token.length()?"stored":"missing");Serial.printf("[config][nvs] Codex: enabled=%s, access_token=%s, account_id=%s, mode=%s\n",config.codex.enabled?"yes":"no",config.codex.token.length()?"stored":"missing",config.codex.accountId.length()?"stored":"missing",config.codex.endpoint.length()?"adapter":"direct");Serial.printf("[config][nvs] Bambu: enabled=%s, mode=%s, serial=%s\n",config.bambu.enabled?"yes":"no",config.bambu.mode==1?"cloud":"local",config.bambu.serial.c_str());Serial.printf("[config][nvs] Display off time: %s, %02u:%02u-%02u:%02u Europe/Berlin\n",config.displayOffEnabled?"enabled":"disabled",config.displayOffFromMinutes/60,config.displayOffFromMinutes%60,config.displayOffUntilMinutes/60,config.displayOffUntilMinutes%60);bool connected=connectWifi();displayBegin(config);displaySetBrightness(config.brightness);displaySetNetwork(startupNetworkText,startupNetworkConnected);bambu.configure(config.bambu);bambu.setActive(false);webBegin(config,!connected,requestUsageRefresh,handleViewChange,handleBambuSessionApplied);Serial.println("[boot] Web portal ready");}
 void loop(){
   displayLoop(); webLoop(); updateDisplayPower(); updateAutomaticReboot();
   bambu.loop();

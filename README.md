@@ -165,11 +165,15 @@ Tested with PlatformIO `espressif32@6.12.0`, Arduino-ESP32 2.0.17, Arduino_GFX 1
 
 ### Bambu Cloud setup (no LAN Only)
 
-1. Open the device web UI → **General** → **Bambu Lab A1**.
-2. Enable the print screen, choose **Bambu Cloud**, region **Global**.
-3. Enter your Bambu account **email** and **password**. Serial is optional; if empty the first bound printer (preferring A1) is taken from the cloud.
-4. Save and restart. Open `/api/view?screen=print`.
-5. If the status shows that a verification code is required, enter the email code in the same form, save again, then open the print screen once more.
+Cloudflare often blocks login requests that originate on the ESP32. Prefer logging in on a PC and pushing the session:
+
+```powershell
+.\tools\bambu-cloud-login.ps1 -DeviceUrl http://192.168.178.123
+```
+
+The script signs in to Bambu Cloud, resolves user id + printer serial, and posts them to `POST /api/bambu/session`. Then open `/api/view?screen=print`.
+
+Direct email/password entry in the web UI remains available, but may show `cloudflare blocked ESP login`.
 | `/api/config` | POST | Save settings to NVS and restart |
 | `/api/wifi/scan` | GET | Scan nearby Wi-Fi networks |
 | `/api/wifi` | POST | Save selected Wi-Fi credentials and restart |

@@ -1,3 +1,3 @@
 #pragma once
 
-static constexpr const char *BUILD_VERSION = "0.9.8.2";
+static constexpr const char *BUILD_VERSION = "0.9.8.3";

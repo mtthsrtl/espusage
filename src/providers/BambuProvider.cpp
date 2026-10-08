@@ -180,9 +180,9 @@ bool BambuClient::cloudLogin() {
     latest.status = "cloud login empty response";
     return false;
   }
-  if (response.indexOf('<') == 0 ||
+  if (code == 403 || response.indexOf('<') == 0 ||
       (response.indexOf("cloudflare") >= 0 && response.indexOf("accessToken") < 0)) {
-    latest.status = "cloud blocked HTTP " + String(code);
+    latest.status = "cloudflare blocked ESP login - run tools/bambu-cloud-login.ps1";
     return false;
   }
 
