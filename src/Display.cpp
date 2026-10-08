@@ -47,7 +47,14 @@ static UsageWindow rowData[5];
 static String rowStatus[5], networkAddress;
 static UsageSnapshot latestCodex, latestCursor;
 static bool availableView = false;
+static DisplayScreen activeScreen = DisplayScreen::Usage;
+static lv_obj_t *usageScreen = nullptr, *printScreen = nullptr;
+static lv_obj_t *printStateLabel = nullptr, *printPercentLabel = nullptr, *printRemainLabel = nullptr;
+static lv_obj_t *printNozzleLabel = nullptr, *printBedLabel = nullptr, *printFileLabel = nullptr;
+static lv_obj_t *printLayerLabel = nullptr, *printFilamentLabel = nullptr, *printStatusLabel = nullptr;
+static lv_obj_t *printModeLabel = nullptr, *printNetworkLabel = nullptr;
 static uint8_t warningLevel = 70, criticalLevel = 90;
+static uint32_t backgroundColorValue = 0;
 static uint32_t overpaceColor = 0xDDF542, warningColor = 0xF0A020;
 static uint32_t paceIndicatorColor = 0xFFFFFF;
 static uint32_t paceIndicatorGlowColor = 0xFFFFFF;
@@ -434,13 +441,55 @@ static void renderPace(uint8_t provider) {
 }
 
 static void renderAll() {
+  if (activeScreen != DisplayScreen::Usage || !modeLabel) return;
   lv_label_set_text(modeLabel, availableView ? "REMAINING" : "USED");
   for (uint8_t i = 0; i < 5; ++i) renderMetric(i);
   renderPace(0); renderPace(1);
   lv_obj_invalidate(lv_scr_act()); lv_refr_now(nullptr);
 }
 
+static void makePrintField(lv_obj_t *parent, const char *caption, int x, int y, int width, lv_obj_t **valueOut) {
+  lv_obj_t *cap = label(parent, caption, &lv_font_montserrat_14, C(0x929292));
+  lv_obj_set_pos(cap, x, y);
+  lv_obj_t *value = label(parent, "--", &lv_font_montserrat_20, C(0xF2F2F2));
+  lv_obj_set_pos(value, x, y + 22);
+  lv_obj_set_width(value, width);
+  lv_label_set_long_mode(value, LV_LABEL_LONG_DOT);
+  *valueOut = value;
+}
+
+static void buildPrintScreen(uint32_t bg) {
+  printScreen = lv_obj_create(nullptr);
+  lv_obj_set_style_bg_color(printScreen, C(bg), 0);
+  lv_obj_set_style_bg_opa(printScreen, LV_OPA_COVER, 0);
+  lv_obj_clear_flag(printScreen, LV_OBJ_FLAG_SCROLLABLE);
+
+  lv_obj_t *title = label(printScreen, "BAMBU A1", &lv_font_montserrat_20, C(0xFFFFFF));
+  lv_obj_set_pos(title, 16, 8);
+  printModeLabel = label(printScreen, "LOCAL", &lv_font_montserrat_12, C(0xA0A8B4));
+  lv_obj_align(printModeLabel, LV_ALIGN_TOP_MID, 0, 14);
+  printNetworkLabel = label(printScreen, "STARTING", &lv_font_montserrat_12, C(0xF2A93B));
+  lv_obj_align(printNetworkLabel, LV_ALIGN_TOP_RIGHT, -16, 14);
+
+  printStateLabel = label(printScreen, "IDLE", &lv_font_montserrat_32, C(0xFFFFFF));
+  lv_obj_set_pos(printStateLabel, 20, 52);
+  printPercentLabel = label(printScreen, "--%", &lv_font_montserrat_32, C(0x7EE6BD));
+  lv_obj_align(printPercentLabel, LV_ALIGN_TOP_RIGHT, -20, 52);
+  printRemainLabel = label(printScreen, "Remaining --", &lv_font_montserrat_20, C(0xD7FBEF));
+  lv_obj_set_pos(printRemainLabel, 20, 100);
+  printStatusLabel = label(printScreen, "Waiting for MQTT", &lv_font_montserrat_14, C(0xA0A8B4));
+  lv_obj_set_pos(printStatusLabel, 20, 132);
+
+  makePrintField(printScreen, "NOZZLE", 20, 170, 200, &printNozzleLabel);
+  makePrintField(printScreen, "BED", 250, 170, 200, &printBedLabel);
+  makePrintField(printScreen, "FILE", 20, 250, 440, &printFileLabel);
+  makePrintField(printScreen, "LAYER", 20, 320, 440, &printLayerLabel);
+  makePrintField(printScreen, "FILAMENT / AMS", 20, 390, 440, &printFilamentLabel);
+  lv_label_set_long_mode(printFilamentLabel, LV_LABEL_LONG_WRAP);
+}
+
 static void toggleView() {
+  if (activeScreen != DisplayScreen::Usage) return;
   availableView = !availableView;
   Serial.printf("[touch][gesture] tap -> view=%s\n", availableView ? "remaining" : "used");
   renderAll();
@@ -690,6 +739,8 @@ static lv_obj_t *makeColumnPanel(const char *title, uint8_t provider, int x, int
 
 void displayBegin(const AppConfig &config) {
   availableView = config.displayAvailable;
+  activeScreen = DisplayScreen::Usage;
+  backgroundColorValue = config.backgroundColor;
   telemetryDesign = config.displayStyle == 2;
   matrixDesign = config.displayStyle == 3;
   columnDesign = config.displayStyle == 4;
@@ -755,6 +806,8 @@ void displayBegin(const AppConfig &config) {
     }
     if (codexPaceVisible) makeColumnPace(codexPanel, 1, columnInnerX, columnHeight - paceHeight, columnInnerWidth, paceHeight);
     Serial.printf("[display] Vertical layout: Cursor metrics=%u, Codex metrics=%u\n", cursorCount, codexCount);
+    usageScreen = lv_scr_act();
+    buildPrintScreen(backgroundColorValue);
     renderAll();
     return;
   }
@@ -793,6 +846,8 @@ void displayBegin(const AppConfig &config) {
       if (codexPaceVisible) makePaceRow(codexPanel, 1, matrixInnerX, rowY, matrixInnerWidth, matrixUnit + matrixExtra);
     }
     Serial.printf("[display] Matrix layout: Cursor units=%u, Codex units=%u, columns=%u\n", cursorUnits, codexUnits, twoColumns ? 2 : 1);
+    usageScreen = lv_scr_act();
+    buildPrintScreen(backgroundColorValue);
     renderAll();
     return;
   }
@@ -837,6 +892,8 @@ void displayBegin(const AppConfig &config) {
   }
   Serial.printf("[display] Layout: Cursor units=%u, Codex units=%u, row=%dpx, bottom=%d\n",
                 cursorUnits, codexUnits, unitHeight, y + codexHeight);
+  usageScreen = lv_scr_act();
+  buildPrintScreen(backgroundColorValue);
   renderAll();
 }
 
@@ -886,9 +943,61 @@ bool displayConsumeTouchActivity() {
 
 void displaySetNetwork(const String &text, bool connected) {
   networkAddress = connected ? text : "";
-  if (!networkLabel) return;
-  lv_label_set_text(networkLabel, text.c_str());
-  lv_obj_set_style_text_color(networkLabel, C(connected ? 0x45D597 : 0xF2A93B), 0);
+  if (networkLabel) {
+    lv_label_set_text(networkLabel, text.c_str());
+    lv_obj_set_style_text_color(networkLabel, C(connected ? 0x45D597 : 0xF2A93B), 0);
+  }
+  if (printNetworkLabel) {
+    lv_label_set_text(printNetworkLabel, text.c_str());
+    lv_obj_set_style_text_color(printNetworkLabel, C(connected ? 0x45D597 : 0xF2A93B), 0);
+  }
+}
+
+bool displaySetScreen(DisplayScreen screen) {
+  if (screen == DisplayScreen::Print && !printScreen) return false;
+  if (screen == DisplayScreen::Usage && !usageScreen) return false;
+  activeScreen = screen;
+  lv_scr_load(screen == DisplayScreen::Print ? printScreen : usageScreen);
+  Serial.printf("[display][screen] %s\n", screen == DisplayScreen::Print ? "print" : "usage");
+  if (screen == DisplayScreen::Usage) renderAll();
+  else lv_obj_invalidate(printScreen);
+  return true;
+}
+
+DisplayScreen displayGetScreen() { return activeScreen; }
+
+void displayUpdatePrint(const BambuStatus &status) {
+  if (!printScreen) return;
+  auto tempText = [](float current, float target) -> String {
+    if (current < 0) return "--";
+    String text = String(current, 0) + " C";
+    if (target >= 0) text += " / " + String(target, 0) + " C";
+    return text;
+  };
+  auto remainText = [](int minutes) -> String {
+    if (minutes < 0) return "Remaining --";
+    if (minutes < 60) return "Remaining " + String(minutes) + "m";
+    return "Remaining " + String(minutes / 60) + "h " + String(minutes % 60) + "m";
+  };
+  if (printModeLabel) lv_label_set_text(printModeLabel, status.mode == "cloud" ? "CLOUD" : "LOCAL");
+  if (printStateLabel) lv_label_set_text(printStateLabel, status.state.length() ? status.state.c_str() : "IDLE");
+  if (printPercentLabel) {
+    String percent = status.percent >= 0 ? String(status.percent) + "%" : "--%";
+    lv_label_set_text(printPercentLabel, percent.c_str());
+  }
+  if (printRemainLabel) lv_label_set_text(printRemainLabel, remainText(status.remainingMinutes).c_str());
+  if (printStatusLabel) lv_label_set_text(printStatusLabel, status.status.c_str());
+  if (printNozzleLabel) lv_label_set_text(printNozzleLabel, tempText(status.nozzleTemp, status.nozzleTarget).c_str());
+  if (printBedLabel) lv_label_set_text(printBedLabel, tempText(status.bedTemp, status.bedTarget).c_str());
+  if (printFileLabel) lv_label_set_text(printFileLabel, status.fileName.length() ? status.fileName.c_str() : "--");
+  if (printLayerLabel) {
+    String layer = "--";
+    if (status.layer >= 0 && status.totalLayers >= 0) layer = String(status.layer) + " / " + String(status.totalLayers);
+    else if (status.layer >= 0) layer = String(status.layer);
+    lv_label_set_text(printLayerLabel, layer.c_str());
+  }
+  if (printFilamentLabel) lv_label_set_text(printFilamentLabel, status.filament.length() ? status.filament.c_str() : "--");
+  if (activeScreen == DisplayScreen::Print) lv_obj_invalidate(printScreen);
 }
 
 TouchDiagnostics displayGetTouchDiagnostics() {

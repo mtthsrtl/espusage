@@ -9,6 +9,17 @@ struct ProviderConfig {
   String accountId;
 };
 
+struct BambuConfig {
+  bool enabled = false;
+  uint8_t mode = 0;   // 0=local, 1=cloud
+  uint8_t region = 0; // 0=global, 1=cn
+  String host;
+  String serial;
+  String accessCode;
+  String userId;
+  String cloudToken;
+};
+
 struct AppConfig {
   String wifiSsid;
   String wifiPassword;
@@ -16,6 +27,7 @@ struct AppConfig {
   String hostname = "espusage";
   ProviderConfig codex;
   ProviderConfig cursor;
+  BambuConfig bambu;
   String tokenApiKey;
   bool codexCreditsFallback = false;
   uint8_t brightness = 85;

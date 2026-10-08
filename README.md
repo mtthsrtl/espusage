@@ -14,7 +14,7 @@ Native, standalone firmware for the 4-inch GUITION ESP32-S3 4848S040 (480×480),
 - Browser-based Wi-Fi scan, network selection, password entry, and NVS-backed reset/reconfiguration
 - Local web configuration at `http://espusage.local/` or the IP shown on screen
 - Runtime configuration stored in ESP32 NVS; provider secrets are not compiled into firmware or returned by diagnostics
-- Browser-upload OTA page, dual OTA partitions, `/api/health`, redacted `/api/status`, sanitized live `/api/usage`, and live `/api/touch` diagnostics
+- Browser-upload OTA page, dual OTA partitions, `/api/health`, redacted `/api/status`, sanitized live `/api/usage`, live `/api/touch` diagnostics, and a separate Bambu A1 print screen switched via `/api/view`
 - Separate transport, Codex adapter, and Cursor provider modules
 
 The display uses the 4848S040 RGB pinout: GPIO 39/48/47 for panel control, GPIO 18/17/16/21 for timing, GPIO 19/45 for GT911 touch, and GPIO 38 for the backlight. Arduino_GFX is configured with 10/8/50 horizontal and 10/8/20 vertical porch/pulse values at a 10 MHz pixel clock.
@@ -161,6 +161,7 @@ Tested with PlatformIO `espressif32@6.12.0`, Arduino-ESP32 2.0.17, Arduino_GFX 1
 | `/api/touch` | GET | Live I²C, GT911, coordinate, and gesture diagnostics; does not intentionally include stored secrets |
 | `/api/display?mode=toggle\|used\|remaining` | GET | Change the displayed usage mode |
 | `/api/display/toggle` | GET/POST | Toggle the physical display backlight and return its new state |
+| `/api/view?screen=usage\|print\|toggle` | GET | Switch the physical display between usage and Bambu print screens (no API key; boot always starts on usage; MQTT only while print is active) |
 | `/api/config` | POST | Save settings to NVS and restart |
 | `/api/wifi/scan` | GET | Scan nearby Wi-Fi networks |
 | `/api/wifi` | POST | Save selected Wi-Fi credentials and restart |

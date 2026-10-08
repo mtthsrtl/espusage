@@ -50,6 +50,14 @@ bool loadConfig(AppConfig &c) {
   c.showCodexFiveHour = prefs.getBool("show_cdx_5h", true);
   c.showCodexWeekly = prefs.getBool("show_cdx_7d", true);
   c.showCodexThirtyMinute = prefs.getBool("show_cdx_30m", true);
+  c.bambu.enabled = prefs.getBool("bambu_on", false);
+  c.bambu.mode = prefs.getUChar("bambu_mode", 0) ? 1 : 0;
+  c.bambu.region = prefs.getUChar("bambu_region", 0) ? 1 : 0;
+  c.bambu.host = prefs.getString("bambu_host", "");
+  c.bambu.serial = prefs.getString("bambu_serial", "");
+  c.bambu.accessCode = prefs.getString("bambu_code", "");
+  c.bambu.userId = prefs.getString("bambu_user", "");
+  c.bambu.cloudToken = prefs.getString("bambu_token", "");
   prefs.end();
   if (uiConfigVersion < UI_CONFIG_VERSION && prefs.begin("espusage", false)) {
     prefs.remove("codex_evt_url");
@@ -91,6 +99,14 @@ bool saveConfig(const AppConfig &c) {
   prefs.putBool("show_cur_od", c.showCursorOnDemand); prefs.putBool("show_cur_30m", c.showCursorThirtyMinute);
   prefs.remove("codex_evt_url");
   prefs.putBool("show_cdx_5h", c.showCodexFiveHour); prefs.putBool("show_cdx_7d", c.showCodexWeekly); prefs.putBool("show_cdx_30m", c.showCodexThirtyMinute);
+  prefs.putBool("bambu_on", c.bambu.enabled);
+  prefs.putUChar("bambu_mode", c.bambu.mode ? 1 : 0);
+  prefs.putUChar("bambu_region", c.bambu.region ? 1 : 0);
+  prefs.putString("bambu_host", c.bambu.host);
+  prefs.putString("bambu_serial", c.bambu.serial);
+  prefs.putString("bambu_code", c.bambu.accessCode);
+  prefs.putString("bambu_user", c.bambu.userId);
+  prefs.putString("bambu_token", c.bambu.cloudToken);
   prefs.putUChar("ui_ver", UI_CONFIG_VERSION);
   prefs.end();
   return true;

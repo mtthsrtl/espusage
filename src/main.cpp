@@ -10,7 +10,9 @@
 #include "WebPortal.h"
 #include "providers/CodexProvider.h"
 #include "providers/CursorProvider.h"
-static AppConfig config; static CodexProvider codex; static CursorProvider cursor; static UsageSnapshot cs,us; static uint32_t lastFetch=0; static bool usageRefreshRequested=false;
+#include "providers/BambuProvider.h"
+static AppConfig config; static CodexProvider codex; static CursorProvider cursor; static BambuClient bambu;
+static UsageSnapshot cs,us; static uint32_t lastFetch=0, lastPrintUiMs=0; static bool usageRefreshRequested=false;
 static volatile uint8_t lastDisconnectReason=0;
 static String startupNetworkText="STARTING"; static bool startupNetworkConnected=false;
 static constexpr const char *DISPLAY_TIMEZONE = "CET-1CEST,M3.5.0/2,M10.5.0/3";
@@ -42,6 +44,35 @@ static void ensureCleanPeripheralBoot() {
 static void requestUsageRefresh() {
   usageRefreshRequested = true;
   Serial.println("[usage][webhook] Immediate refresh requested");
+}
+
+static bool handleViewChange(const char *screen) {
+  DisplayScreen current = displayGetScreen();
+  DisplayScreen target = current;
+  String name = screen ? screen : "";
+  name.toLowerCase();
+  if (name == "toggle") target = current == DisplayScreen::Print ? DisplayScreen::Usage : DisplayScreen::Print;
+  else if (name == "print") target = DisplayScreen::Print;
+  else if (name == "usage") target = DisplayScreen::Usage;
+  else return false;
+
+  if (target == DisplayScreen::Print) {
+    if (!config.bambu.enabled) {
+      Serial.println("[display][view] Print screen disabled in config");
+      return false;
+    }
+    bambu.configure(config.bambu);
+    if (!displaySetScreen(DisplayScreen::Print)) return false;
+    bambu.setActive(true);
+    BambuStatus status = bambu.snapshot();
+    displayUpdatePrint(status);
+    webUpdatePrint(status);
+    return true;
+  }
+
+  bambu.setActive(false);
+  webUpdatePrint(bambu.snapshot());
+  return displaySetScreen(DisplayScreen::Usage);
 }
 
 static void updateAutomaticReboot() {
@@ -213,9 +244,16 @@ static bool connectWifi(){
     Serial.println("[wifi][setup] Falling back to recovery portal");startRecoveryAp("ESPUsage-Setup");return false;
   }
 }
-void setup(){Serial.begin(115200);delay(300);Serial.println("\n[boot] ESP Usage starting");ensureCleanPeripheralBoot();loadConfig(config);Serial.printf("[config][nvs] Cursor: enabled=%s, token=%s\n",config.cursor.enabled?"yes":"no",config.cursor.token.length()?"stored":"missing");Serial.printf("[config][nvs] Codex: enabled=%s, access_token=%s, account_id=%s, mode=%s\n",config.codex.enabled?"yes":"no",config.codex.token.length()?"stored":"missing",config.codex.accountId.length()?"stored":"missing",config.codex.endpoint.length()?"adapter":"direct");Serial.printf("[config][nvs] Display off time: %s, %02u:%02u-%02u:%02u Europe/Berlin\n",config.displayOffEnabled?"enabled":"disabled",config.displayOffFromMinutes/60,config.displayOffFromMinutes%60,config.displayOffUntilMinutes/60,config.displayOffUntilMinutes%60);bool connected=connectWifi();displayBegin(config);displaySetBrightness(config.brightness);displaySetNetwork(startupNetworkText,startupNetworkConnected);webBegin(config,!connected,requestUsageRefresh);Serial.println("[boot] Web portal ready");}
+void setup(){Serial.begin(115200);delay(300);Serial.println("\n[boot] ESP Usage starting");ensureCleanPeripheralBoot();loadConfig(config);Serial.printf("[config][nvs] Cursor: enabled=%s, token=%s\n",config.cursor.enabled?"yes":"no",config.cursor.token.length()?"stored":"missing");Serial.printf("[config][nvs] Codex: enabled=%s, access_token=%s, account_id=%s, mode=%s\n",config.codex.enabled?"yes":"no",config.codex.token.length()?"stored":"missing",config.codex.accountId.length()?"stored":"missing",config.codex.endpoint.length()?"adapter":"direct");Serial.printf("[config][nvs] Bambu: enabled=%s, mode=%s, serial=%s\n",config.bambu.enabled?"yes":"no",config.bambu.mode==1?"cloud":"local",config.bambu.serial.c_str());Serial.printf("[config][nvs] Display off time: %s, %02u:%02u-%02u:%02u Europe/Berlin\n",config.displayOffEnabled?"enabled":"disabled",config.displayOffFromMinutes/60,config.displayOffFromMinutes%60,config.displayOffUntilMinutes/60,config.displayOffUntilMinutes%60);bool connected=connectWifi();displayBegin(config);displaySetBrightness(config.brightness);displaySetNetwork(startupNetworkText,startupNetworkConnected);bambu.configure(config.bambu);bambu.setActive(false);webBegin(config,!connected,requestUsageRefresh,handleViewChange);Serial.println("[boot] Web portal ready");}
 void loop(){
   displayLoop(); webLoop(); updateDisplayPower(); updateAutomaticReboot();
+  bambu.loop();
+  if(bambu.isActive()&&millis()-lastPrintUiMs>=500){
+    lastPrintUiMs=millis();
+    BambuStatus status=bambu.snapshot();
+    displayUpdatePrint(status);
+    webUpdatePrint(status);
+  }
   if(WiFi.status()==WL_CONNECTED&&(usageRefreshRequested||lastFetch==0||millis()-lastFetch>(uint32_t)config.refreshMinutes*60000UL)){
     usageRefreshRequested=false; lastFetch=millis(); Serial.println("[usage] Refreshing Codex and Cursor");
     UsageSnapshot freshCodex=codex.fetch(config.codex,config.verifyTls);
@@ -230,7 +268,8 @@ void loop(){
     else if(us.ok){us.status="stale: "+freshCursor.status;}
     else us=freshCursor;
     Serial.printf("[usage][cursor] %s\n",us.status.c_str());
-    displayUpdate(cs,us,config.warningPercent,config.criticalPercent,config.refreshMinutes); webUpdateUsage(cs,us);
+    if(displayGetScreen()==DisplayScreen::Usage) displayUpdate(cs,us,config.warningPercent,config.criticalPercent,config.refreshMinutes);
+    webUpdateUsage(cs,us);
   }
   delay(5);
 }
