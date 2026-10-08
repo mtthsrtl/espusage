@@ -4,6 +4,7 @@
 #include <HTTPClient.h>
 #include <PubSubClient.h>
 #include <ArduinoJson.h>
+#include <mbedtls/base64.h>
 
 static BambuClient *activeClient = nullptr;
 static WiFiClientSecure tlsClient;
@@ -21,6 +22,59 @@ static String formatRemaining(int minutes) {
   int hours = minutes / 60, mins = minutes % 60;
   if (hours < 48) return String(hours) + "h " + String(mins) + "m";
   return String(hours / 24) + "d " + String(hours % 24) + "h";
+}
+
+static String jsonStringField(const String &json, const char *key) {
+  String needle = String("\"") + key + "\":\"";
+  int start = json.indexOf(needle);
+  if (start < 0) return "";
+  start += needle.length();
+  int end = start;
+  while (end < (int)json.length()) {
+    char c = json[end];
+    if (c == '\\' && end + 1 < (int)json.length()) { end += 2; continue; }
+    if (c == '"') break;
+    end++;
+  }
+  if (end >= (int)json.length()) return "";
+  return json.substring(start, end);
+}
+
+static String uidFromJwt(const String &jwt) {
+  int d1 = jwt.indexOf('.');
+  int d2 = jwt.indexOf('.', d1 + 1);
+  if (d1 < 0 || d2 < 0) return "";
+  String payload = jwt.substring(d1 + 1, d2);
+  while (payload.length() % 4) payload += '=';
+  payload.replace('-', '+');
+  payload.replace('_', '/');
+  size_t decodedLen = 0;
+  unsigned char *decoded = (unsigned char *)malloc(payload.length());
+  if (!decoded) return "";
+  if (mbedtls_base64_decode(decoded, payload.length(), &decodedLen,
+                            (const unsigned char *)payload.c_str(), payload.length()) != 0) {
+    free(decoded);
+    return "";
+  }
+  String json((char *)decoded, decodedLen);
+  free(decoded);
+  String username = jsonStringField(json, "username");
+  if (username.startsWith("u_")) return username.substring(2);
+  String userId = jsonStringField(json, "user_id");
+  if (userId.length()) return userId;
+  return "";
+}
+
+static void addBambuHeaders(HTTPClient &http) {
+  http.addHeader("Content-Type", "application/json");
+  http.addHeader("accept", "application/json");
+  http.addHeader("User-Agent", "bambu_network_agent/01.09.05.01");
+  http.addHeader("X-BBL-Client-Name", "OrcaSlicer");
+  http.addHeader("X-BBL-Client-Type", "slicer");
+  http.addHeader("X-BBL-Client-Version", "01.09.05.51");
+  http.addHeader("X-BBL-Language", "en-US");
+  http.addHeader("X-BBL-OS-Type", "linux");
+  http.addHeader("X-BBL-Agent-Version", "01.09.05.01");
 }
 
 void BambuClient::mqttCallback(char *topic, byte *payload, unsigned int length) {
@@ -101,9 +155,8 @@ bool BambuClient::cloudLogin() {
     latest.status = "cloud login begin failed";
     return false;
   }
-  http.setTimeout(15000);
-  http.addHeader("Content-Type", "application/json");
-  http.addHeader("User-Agent", "espusage/0.9.8");
+  http.setTimeout(20000);
+  addBambuHeaders(http);
 
   JsonDocument body;
   body["account"] = config.account;
@@ -118,24 +171,48 @@ bool BambuClient::cloudLogin() {
   int code = http.POST(payload);
   String response = http.getString();
   http.end();
-  Serial.printf("[bambu][cloud] login HTTP %d\n", code);
+  Serial.printf("[bambu][cloud] login HTTP %d, bytes=%u\n", code, (unsigned)response.length());
   if (code <= 0) {
     latest.status = "cloud login network error";
     return false;
   }
-
-  JsonDocument doc;
-  if (deserializeJson(doc, response)) {
-    latest.status = "cloud login JSON error";
+  if (!response.length()) {
+    latest.status = "cloud login empty response";
+    return false;
+  }
+  if (response.indexOf('<') == 0 ||
+      (response.indexOf("cloudflare") >= 0 && response.indexOf("accessToken") < 0)) {
+    latest.status = "cloud blocked HTTP " + String(code);
     return false;
   }
 
-  String loginType = doc["loginType"] | "";
-  String accessToken = doc["accessToken"] | "";
+  String loginType = jsonStringField(response, "loginType");
+  String accessToken = jsonStringField(response, "accessToken");
+  String error = jsonStringField(response, "error");
+  if (!error.length()) {
+    // error may be unquoted null; also try message
+    error = jsonStringField(response, "message");
+  }
+
   if (!accessToken.length() && loginType == "verifyCode") {
     latest.needsVerifyCode = true;
     latest.status = "email verification code required";
-    Serial.println("[bambu][cloud] Bambu asks for verifyCode");
+    // Ask Bambu to send the email code.
+    WiFiClientSecure https2;
+    https2.setInsecure();
+    HTTPClient http2;
+    String codeUrl = cloudApiBase() + "/v1/user-service/user/sendemail/code";
+    if (http2.begin(https2, codeUrl)) {
+      addBambuHeaders(http2);
+      JsonDocument codeBody;
+      codeBody["email"] = config.account;
+      codeBody["type"] = "codeLogin";
+      String codePayload;
+      serializeJson(codeBody, codePayload);
+      int codeHttp = http2.POST(codePayload);
+      Serial.printf("[bambu][cloud] sendemail/code HTTP %d\n", codeHttp);
+      http2.end();
+    }
     return false;
   }
   if (!accessToken.length() && loginType == "tfa") {
@@ -144,8 +221,8 @@ bool BambuClient::cloudLogin() {
     return false;
   }
   if (!accessToken.length()) {
-    String message = doc["message"] | doc["error"] | "login failed";
-    latest.status = "cloud login: " + message;
+    if (error.length()) latest.status = "cloud login: " + error;
+    else latest.status = "cloud login failed HTTP " + String(code);
     return false;
   }
 
@@ -154,18 +231,33 @@ bool BambuClient::cloudLogin() {
     authDirty = true;
     latest.authDirty = true;
   }
+  String uid = uidFromJwt(accessToken);
+  if (uid.length() && config.userId != uid) {
+    config.userId = uid;
+    authDirty = true;
+    latest.authDirty = true;
+    Serial.printf("[bambu][cloud] uid from jwt=%s\n", uid.c_str());
+  }
   if (config.verifyCode.length()) {
     config.verifyCode = "";
     authDirty = true;
     latest.authDirty = true;
   }
-  Serial.println("[bambu][cloud] access token received");
+  Serial.printf("[bambu][cloud] access token received (%u chars)\n", (unsigned)accessToken.length());
   return true;
 }
 
 bool BambuClient::cloudFetchUserId() {
   if (config.userId.length()) return true;
   if (!config.cloudToken.length()) return false;
+  String uid = uidFromJwt(config.cloudToken);
+  if (uid.length()) {
+    config.userId = uid;
+    authDirty = true;
+    latest.authDirty = true;
+    Serial.printf("[bambu][cloud] uid from jwt=%s\n", uid.c_str());
+    return true;
+  }
   latest.status = "fetching cloud user id...";
   WiFiClientSecure https;
   https.setInsecure();
@@ -173,8 +265,8 @@ bool BambuClient::cloudFetchUserId() {
   String url = cloudApiBase() + "/v1/design-user-service/my/preference";
   if (!http.begin(https, url)) return false;
   http.setTimeout(15000);
+  addBambuHeaders(http);
   http.addHeader("Authorization", "Bearer " + config.cloudToken);
-  http.addHeader("User-Agent", "espusage/0.9.8");
   int code = http.GET();
   String response = http.getString();
   http.end();
@@ -182,6 +274,7 @@ bool BambuClient::cloudFetchUserId() {
     latest.status = "user id HTTP " + String(code);
     return false;
   }
+  // Prefer lightweight extract; preference JSON is small.
   JsonDocument doc;
   if (deserializeJson(doc, response)) {
     latest.status = "user id JSON error";
@@ -191,7 +284,7 @@ bool BambuClient::cloudFetchUserId() {
     latest.status = "user id missing";
     return false;
   }
-  String uid = String(doc["uid"].as<long long>());
+  uid = String((long long)doc["uid"].as<long long>());
   if (!uid.length()) return false;
   config.userId = uid;
   authDirty = true;
@@ -210,8 +303,8 @@ bool BambuClient::cloudFillSerialIfNeeded() {
   String url = cloudApiBase() + "/v1/iot-service/api/user/bind";
   if (!http.begin(https, url)) return false;
   http.setTimeout(15000);
+  addBambuHeaders(http);
   http.addHeader("Authorization", "Bearer " + config.cloudToken);
-  http.addHeader("User-Agent", "espusage/0.9.8");
   int code = http.GET();
   String response = http.getString();
   http.end();
