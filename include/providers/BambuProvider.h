@@ -19,6 +19,10 @@ struct BambuStatus {
   int layer = -1;
   int totalLayers = -1;
   int speedPercent = -1;
+  int stageId = -1;
+  int partFanPercent = -1;
+  int auxFanPercent = -1;
+  String stage;
   String fileName;
   String filament;
   String mode;

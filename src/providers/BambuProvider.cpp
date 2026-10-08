@@ -24,6 +24,46 @@ static String formatRemaining(int minutes) {
   return String(hours / 24) + "d " + String(hours % 24) + "h";
 }
 
+static int fanToPercent(int raw) {
+  if (raw < 0) return -1;
+  if (raw <= 15) return constrain((raw * 100 + 7) / 15, 0, 100);
+  return constrain(raw, 0, 100);
+}
+
+static int readFanField(JsonVariantConst value) {
+  if (value.isNull()) return -1;
+  if (value.is<const char *>()) return fanToPercent(String(value.as<const char *>()).toInt());
+  return fanToPercent(value.as<int>());
+}
+
+static const char *stageLabel(int stageId) {
+  switch (stageId) {
+    case 0: return "PRINTING";
+    case 1: return "BED LEVELING";
+    case 2: return "HEATING BED";
+    case 3: return "VIBRATION CAL";
+    case 4: return "FILAMENT CHANGE";
+    case 5: return "M400 PAUSE";
+    case 6: return "FILAMENT RUNOUT";
+    case 7: return "HEATING NOZZLE";
+    case 8: return "EXTRUSION CAL";
+    case 9: return "SCANNING BED";
+    case 10: return "FIRST LAYER CHECK";
+    case 11: return "DETECT PLATE";
+    case 12: return "LIDAR CAL";
+    case 13: return "HOMING";
+    case 14: return "CLEANING NOZZLE";
+    case 15: return "CHECK NOZZLE TEMP";
+    case 16: return "PAUSED BY USER";
+    case 17: return "COVER OPEN";
+    case 18: return "LIDAR CAL";
+    case 19: return "FLOW CAL";
+    case 20: return "NOZZLE TEMP FAULT";
+    case 21: return "BED TEMP FAULT";
+    default: return "";
+  }
+}
+
 static String jsonStringField(const String &json, const char *key) {
   String needle = String("\"") + key + "\":\"";
   int start = json.indexOf(needle);
@@ -441,6 +481,9 @@ void BambuClient::handleMessage(const char *topic, const uint8_t *payload, unsig
   printFilter["layer_num"] = true;
   printFilter["total_layer_num"] = true;
   printFilter["spd_mag"] = true;
+  printFilter["stg_cur"] = true;
+  printFilter["cooling_fan_speed"] = true;
+  printFilter["big_fan1_speed"] = true;
   printFilter["gcode_file"] = true;
   printFilter["subtask_name"] = true;
   printFilter["command"] = true;
@@ -464,6 +507,14 @@ void BambuClient::handleMessage(const char *topic, const uint8_t *payload, unsig
   if (!print["layer_num"].isNull()) latest.layer = print["layer_num"].as<int>();
   if (!print["total_layer_num"].isNull()) latest.totalLayers = print["total_layer_num"].as<int>();
   if (!print["spd_mag"].isNull()) latest.speedPercent = print["spd_mag"].as<int>();
+  if (!print["stg_cur"].isNull()) {
+    latest.stageId = print["stg_cur"].as<int>();
+    latest.stage = stageLabel(latest.stageId);
+  }
+  int partFan = readFanField(print["cooling_fan_speed"]);
+  if (partFan >= 0) latest.partFanPercent = partFan;
+  int auxFan = readFanField(print["big_fan1_speed"]);
+  if (auxFan >= 0) latest.auxFanPercent = auxFan;
 
   if (print["subtask_name"].is<const char *>()) latest.fileName = basenameOf(print["subtask_name"].as<const char *>());
   else if (print["gcode_file"].is<const char *>()) latest.fileName = basenameOf(print["gcode_file"].as<const char *>());
@@ -471,6 +522,8 @@ void BambuClient::handleMessage(const char *topic, const uint8_t *payload, unsig
   latest.ok = latest.state.length() > 0 || latest.percent >= 0;
   if (latest.state.length()) {
     latest.status = latest.state;
+    if (latest.stage.length() && (latest.state == "RUNNING" || latest.state == "PAUSE" || latest.state == "PREPARE"))
+      latest.status += " / " + latest.stage;
     if (latest.percent >= 0) latest.status += " " + String(latest.percent) + "%";
     if (latest.remainingMinutes >= 0) latest.status += " - " + formatRemaining(latest.remainingMinutes);
   } else {

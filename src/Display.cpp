@@ -50,9 +50,12 @@ static bool availableView = false;
 static DisplayScreen activeScreen = DisplayScreen::Usage;
 static lv_obj_t *usageScreen = nullptr, *printScreen = nullptr;
 static lv_obj_t *printStateLabel = nullptr, *printPercentLabel = nullptr, *printEtaLabel = nullptr;
-static lv_obj_t *printLayerLabel = nullptr, *printNozzleLabel = nullptr, *printBedLabel = nullptr;
-static lv_obj_t *printSpeedLabel = nullptr, *printConnLabel = nullptr;
-static lv_obj_t *printPercentBar = nullptr, *printLayerBar = nullptr, *printNozzleBar = nullptr, *printBedBar = nullptr;
+static lv_obj_t *printStageLabel = nullptr, *printLayerLabel = nullptr;
+static lv_obj_t *printNozzleLabel = nullptr, *printBedLabel = nullptr;
+static lv_obj_t *printSpeedLabel = nullptr, *printPartFanLabel = nullptr, *printAuxFanLabel = nullptr;
+static lv_obj_t *printPercentBar = nullptr, *printLayerBar = nullptr;
+static lv_obj_t *printNozzleBar = nullptr, *printBedBar = nullptr;
+static lv_obj_t *printPartFanBar = nullptr, *printAuxFanBar = nullptr;
 static lv_obj_t *printModeLabel = nullptr, *printNetworkLabel = nullptr;
 static uint8_t warningLevel = 70, criticalLevel = 90;
 static uint32_t backgroundColorValue = 0;
@@ -479,36 +482,47 @@ static void buildPrintScreen(uint32_t bg) {
   lv_obj_align(printNetworkLabel, LV_ALIGN_TOP_RIGHT, -16, 14);
 
   printStateLabel = label(printScreen, "IDLE", &lv_font_montserrat_32, C(0xFFFFFF));
-  lv_obj_set_pos(printStateLabel, 20, 48);
+  lv_obj_set_pos(printStateLabel, 20, 42);
   printPercentLabel = label(printScreen, "--%", &lv_font_montserrat_32, C(0x7EE6BD));
-  lv_obj_align(printPercentLabel, LV_ALIGN_TOP_RIGHT, -20, 48);
-  printEtaLabel = label(printScreen, "ETA --", &lv_font_montserrat_24, C(0xD7FBEF));
-  lv_obj_set_pos(printEtaLabel, 20, 100);
+  lv_obj_align(printPercentLabel, LV_ALIGN_TOP_RIGHT, -20, 42);
+  printStageLabel = label(printScreen, "WAITING", &lv_font_montserrat_16, C(0xA0A8B4));
+  lv_obj_set_pos(printStageLabel, 20, 84);
+  printEtaLabel = label(printScreen, "ETA --", &lv_font_montserrat_20, C(0xD7FBEF));
+  lv_obj_set_pos(printEtaLabel, 20, 112);
   printSpeedLabel = label(printScreen, "SPEED --", &lv_font_montserrat_16, C(0xA0A8B4));
-  lv_obj_align(printSpeedLabel, LV_ALIGN_TOP_RIGHT, -20, 108);
-  printConnLabel = label(printScreen, "Connecting...", &lv_font_montserrat_14, C(0xA0A8B4));
-  lv_obj_set_pos(printConnLabel, 20, 140);
+  lv_obj_align(printSpeedLabel, LV_ALIGN_TOP_RIGHT, -20, 116);
 
   lv_obj_t *progressCap = label(printScreen, "PROGRESS", &lv_font_montserrat_14, C(0x929292));
-  lv_obj_set_pos(progressCap, 20, 178);
-  printPercentBar = makePrintBar(printScreen, 20, 202, 440, 22, 0x35D078);
+  lv_obj_set_pos(progressCap, 20, 150);
+  printPercentBar = makePrintBar(printScreen, 20, 172, 440, 18, 0x35D078);
 
-  printLayerLabel = label(printScreen, "LAYER -- / --", &lv_font_montserrat_20, C(0xF2F2F2));
-  lv_obj_set_pos(printLayerLabel, 20, 244);
-  printLayerBar = makePrintBar(printScreen, 20, 276, 440, 22, 0x5B9BD5);
+  printLayerLabel = label(printScreen, "LAYER -- / --", &lv_font_montserrat_16, C(0xF2F2F2));
+  lv_obj_set_pos(printLayerLabel, 20, 204);
+  printLayerBar = makePrintBar(printScreen, 20, 228, 440, 18, 0x5B9BD5);
 
   lv_obj_t *nozzleCap = label(printScreen, "NOZZLE", &lv_font_montserrat_14, C(0x929292));
-  lv_obj_set_pos(nozzleCap, 20, 324);
-  printNozzleLabel = label(printScreen, "-- C", &lv_font_montserrat_20, C(0xF2F2F2));
-  lv_obj_set_pos(printNozzleLabel, 20, 346);
-  printNozzleBar = makePrintBar(printScreen, 20, 378, 200, 16, 0xF0A020);
+  lv_obj_set_pos(nozzleCap, 20, 262);
+  printNozzleLabel = label(printScreen, "-- C", &lv_font_montserrat_16, C(0xF2F2F2));
+  lv_obj_set_pos(printNozzleLabel, 20, 282);
+  printNozzleBar = makePrintBar(printScreen, 20, 306, 200, 14, 0xF0A020);
 
   lv_obj_t *bedCap = label(printScreen, "BED", &lv_font_montserrat_14, C(0x929292));
-  lv_obj_set_pos(bedCap, 250, 324);
-  printBedLabel = label(printScreen, "-- C", &lv_font_montserrat_20, C(0xF2F2F2));
-  lv_obj_set_pos(printBedLabel, 250, 346);
-  printBedBar = makePrintBar(printScreen, 250, 378, 210, 16, 0xE06C75);
+  lv_obj_set_pos(bedCap, 250, 262);
+  printBedLabel = label(printScreen, "-- C", &lv_font_montserrat_16, C(0xF2F2F2));
+  lv_obj_set_pos(printBedLabel, 250, 282);
+  printBedBar = makePrintBar(printScreen, 250, 306, 210, 14, 0xE06C75);
 
+  lv_obj_t *partCap = label(printScreen, "PART FAN", &lv_font_montserrat_14, C(0x929292));
+  lv_obj_set_pos(partCap, 20, 338);
+  printPartFanLabel = label(printScreen, "--%", &lv_font_montserrat_16, C(0xF2F2F2));
+  lv_obj_set_pos(printPartFanLabel, 20, 358);
+  printPartFanBar = makePrintBar(printScreen, 20, 382, 200, 14, 0x56C2D6);
+
+  lv_obj_t *auxCap = label(printScreen, "AUX FAN", &lv_font_montserrat_14, C(0x929292));
+  lv_obj_set_pos(auxCap, 250, 338);
+  printAuxFanLabel = label(printScreen, "--%", &lv_font_montserrat_16, C(0xF2F2F2));
+  lv_obj_set_pos(printAuxFanLabel, 250, 358);
+  printAuxFanBar = makePrintBar(printScreen, 250, 382, 210, 14, 0x7AA2F7);
 }
 
 static void toggleView() {
@@ -1029,15 +1043,25 @@ void displayUpdatePrint(const BambuStatus &status) {
     String percent = status.percent >= 0 ? String(status.percent) + "%" : "--%";
     lv_label_set_text(printPercentLabel, percent.c_str());
   }
+  if (printStageLabel) {
+    String stageText = "WAITING";
+    if (!status.connected && status.active) stageText = status.status.length() ? status.status : "CONNECTING";
+    else if (state == "RUNNING" || state == "PAUSE" || state == "PREPARE") {
+      if (status.stage.length()) stageText = status.stage;
+      else if (state == "RUNNING") stageText = "PRINTING";
+      else stageText = state;
+    } else if (state == "IDLE") stageText = "IDLE";
+    else if (state == "FINISH") stageText = "FINISHED";
+    else if (state == "FAILED") stageText = "FAILED";
+    else if (status.stage.length()) stageText = status.stage;
+    else stageText = state;
+    lv_label_set_text(printStageLabel, stageText.c_str());
+    lv_obj_set_style_text_color(printStageLabel, C(stateColor), 0);
+  }
   if (printEtaLabel) lv_label_set_text(printEtaLabel, etaText(status.remainingMinutes).c_str());
   if (printSpeedLabel) {
     String speed = status.speedPercent >= 0 ? ("SPEED " + String(status.speedPercent) + "%") : "SPEED --";
     lv_label_set_text(printSpeedLabel, speed.c_str());
-  }
-  if (printConnLabel) {
-    String conn = status.connected ? status.status : (status.active ? status.status : "disconnected");
-    lv_label_set_text(printConnLabel, conn.c_str());
-    lv_obj_set_style_text_color(printConnLabel, C(status.connected ? 0x72D7B5 : 0xF2A93B), 0);
   }
   if (printPercentBar) lv_bar_set_value(printPercentBar, status.percent >= 0 ? constrain(status.percent, 0, 100) : 0, LV_ANIM_OFF);
   if (printLayerLabel) {
@@ -1056,6 +1080,16 @@ void displayUpdatePrint(const BambuStatus &status) {
   if (printBedLabel) lv_label_set_text(printBedLabel, tempText(status.bedTemp, status.bedTarget).c_str());
   if (printNozzleBar) lv_bar_set_value(printNozzleBar, tempBar(status.nozzleTemp, status.nozzleTarget), LV_ANIM_OFF);
   if (printBedBar) lv_bar_set_value(printBedBar, tempBar(status.bedTemp, status.bedTarget), LV_ANIM_OFF);
+  if (printPartFanLabel) {
+    String text = status.partFanPercent >= 0 ? (String(status.partFanPercent) + "%") : "--%";
+    lv_label_set_text(printPartFanLabel, text.c_str());
+  }
+  if (printAuxFanLabel) {
+    String text = status.auxFanPercent >= 0 ? (String(status.auxFanPercent) + "%") : "--%";
+    lv_label_set_text(printAuxFanLabel, text.c_str());
+  }
+  if (printPartFanBar) lv_bar_set_value(printPartFanBar, status.partFanPercent >= 0 ? status.partFanPercent : 0, LV_ANIM_OFF);
+  if (printAuxFanBar) lv_bar_set_value(printAuxFanBar, status.auxFanPercent >= 0 ? status.auxFanPercent : 0, LV_ANIM_OFF);
   if (activeScreen == DisplayScreen::Print) {
     lv_obj_invalidate(printScreen);
     lv_refr_now(nullptr);
