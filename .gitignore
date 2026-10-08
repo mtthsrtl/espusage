@@ -7,4 +7,5 @@ credentials.*
 .env
 firmware.bin
 platformio.ini
+local-readme.md
 
