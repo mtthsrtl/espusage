@@ -440,20 +440,10 @@ void BambuClient::handleMessage(const char *topic, const uint8_t *payload, unsig
   printFilter["bed_target_temper"] = true;
   printFilter["layer_num"] = true;
   printFilter["total_layer_num"] = true;
+  printFilter["spd_mag"] = true;
   printFilter["gcode_file"] = true;
   printFilter["subtask_name"] = true;
   printFilter["command"] = true;
-  JsonObject amsFilter = printFilter["ams"].to<JsonObject>();
-  JsonArray amsUnits = amsFilter["ams"].to<JsonArray>();
-  JsonObject amsUnit = amsUnits.add<JsonObject>();
-  JsonArray trays = amsUnit["tray"].to<JsonArray>();
-  JsonObject tray = trays.add<JsonObject>();
-  tray["tray_type"] = true;
-  tray["tray_color"] = true;
-  tray["tray_sub_brands"] = true;
-  JsonObject vt = printFilter["vt_tray"].to<JsonObject>();
-  vt["tray_type"] = true;
-  vt["tray_color"] = true;
 
   JsonDocument doc;
   DeserializationError err = deserializeJson(doc, payload, length, DeserializationOption::Filter(filter));
@@ -473,44 +463,16 @@ void BambuClient::handleMessage(const char *topic, const uint8_t *payload, unsig
   if (!print["bed_target_temper"].isNull()) latest.bedTarget = print["bed_target_temper"].as<float>();
   if (!print["layer_num"].isNull()) latest.layer = print["layer_num"].as<int>();
   if (!print["total_layer_num"].isNull()) latest.totalLayers = print["total_layer_num"].as<int>();
+  if (!print["spd_mag"].isNull()) latest.speedPercent = print["spd_mag"].as<int>();
 
-  String file;
-  if (print["subtask_name"].is<const char *>()) file = print["subtask_name"].as<const char *>();
-  if (!file.length() && print["gcode_file"].is<const char *>()) file = print["gcode_file"].as<const char *>();
-  if (file.length()) latest.fileName = basenameOf(file);
-
-  String filament;
-  if (print["ams"]["ams"].is<JsonArray>()) {
-    for (JsonObject unit : print["ams"]["ams"].as<JsonArray>()) {
-      if (!unit["tray"].is<JsonArray>()) continue;
-      for (JsonObject t : unit["tray"].as<JsonArray>()) {
-        String type = t["tray_type"] | "";
-        if (!type.length()) continue;
-        String color = t["tray_color"] | "";
-        String brand = t["tray_sub_brands"] | "";
-        if (filament.length()) filament += " | ";
-        filament += type;
-        if (brand.length()) filament += " " + brand;
-        if (color.length()) filament += " #" + color;
-      }
-    }
-  }
-  if (!filament.length() && print["vt_tray"].is<JsonObject>()) {
-    String type = print["vt_tray"]["tray_type"] | "";
-    String color = print["vt_tray"]["tray_color"] | "";
-    if (type.length()) {
-      filament = type;
-      if (color.length()) filament += " #" + color;
-      filament += " (ext)";
-    }
-  }
-  if (filament.length()) latest.filament = filament;
+  if (print["subtask_name"].is<const char *>()) latest.fileName = basenameOf(print["subtask_name"].as<const char *>());
+  else if (print["gcode_file"].is<const char *>()) latest.fileName = basenameOf(print["gcode_file"].as<const char *>());
 
   latest.ok = latest.state.length() > 0 || latest.percent >= 0;
   if (latest.state.length()) {
     latest.status = latest.state;
     if (latest.percent >= 0) latest.status += " " + String(latest.percent) + "%";
-    if (latest.remainingMinutes >= 0) latest.status += " · " + formatRemaining(latest.remainingMinutes);
+    if (latest.remainingMinutes >= 0) latest.status += " - " + formatRemaining(latest.remainingMinutes);
   } else {
     latest.status = "online";
   }

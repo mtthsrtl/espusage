@@ -18,6 +18,7 @@ struct BambuStatus {
   float bedTarget = -1;
   int layer = -1;
   int totalLayers = -1;
+  int speedPercent = -1;
   String fileName;
   String filament;
   String mode;
