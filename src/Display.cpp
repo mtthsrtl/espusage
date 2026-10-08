@@ -460,6 +460,7 @@ static void makePrintField(lv_obj_t *parent, const char *caption, int x, int y, 
 
 static void buildPrintScreen(uint32_t bg) {
   printScreen = lv_obj_create(nullptr);
+  lv_obj_set_size(printScreen, 480, 480);
   lv_obj_set_style_bg_color(printScreen, C(bg), 0);
   lv_obj_set_style_bg_opa(printScreen, LV_OPA_COVER, 0);
   lv_obj_clear_flag(printScreen, LV_OBJ_FLAG_SCROLLABLE);
@@ -956,11 +957,16 @@ void displaySetNetwork(const String &text, bool connected) {
 bool displaySetScreen(DisplayScreen screen) {
   if (screen == DisplayScreen::Print && !printScreen) return false;
   if (screen == DisplayScreen::Usage && !usageScreen) return false;
+  lv_obj_t *target = screen == DisplayScreen::Print ? printScreen : usageScreen;
   activeScreen = screen;
-  lv_scr_load(screen == DisplayScreen::Print ? printScreen : usageScreen);
-  Serial.printf("[display][screen] %s\n", screen == DisplayScreen::Print ? "print" : "usage");
+  lv_scr_load(target);
+  // RGB panel keeps the previous framebuffer until LVGL fully redraws the new
+  // screen. Force a complete refresh so /api/view visually switches.
+  lv_obj_invalidate(target);
+  lv_refr_now(nullptr);
+  Serial.printf("[display][screen] %s (act=%s)\n", screen == DisplayScreen::Print ? "print" : "usage",
+                lv_scr_act() == printScreen ? "print" : lv_scr_act() == usageScreen ? "usage" : "other");
   if (screen == DisplayScreen::Usage) renderAll();
-  else lv_obj_invalidate(printScreen);
   return true;
 }
 
@@ -997,7 +1003,10 @@ void displayUpdatePrint(const BambuStatus &status) {
     lv_label_set_text(printLayerLabel, layer.c_str());
   }
   if (printFilamentLabel) lv_label_set_text(printFilamentLabel, status.filament.length() ? status.filament.c_str() : "--");
-  if (activeScreen == DisplayScreen::Print) lv_obj_invalidate(printScreen);
+  if (activeScreen == DisplayScreen::Print) {
+    lv_obj_invalidate(printScreen);
+    lv_refr_now(nullptr);
+  }
 }
 
 TouchDiagnostics displayGetTouchDiagnostics() {
