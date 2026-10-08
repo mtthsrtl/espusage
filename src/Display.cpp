@@ -54,9 +54,11 @@ static lv_obj_t *printStageLabel = nullptr, *printLayerLabel = nullptr;
 static lv_obj_t *printNozzleLabel = nullptr, *printBedLabel = nullptr;
 static lv_obj_t *printSpeedLabel = nullptr, *printPartFanLabel = nullptr, *printAuxFanLabel = nullptr;
 static lv_obj_t *printPercentBar = nullptr, *printLayerBar = nullptr;
-static lv_obj_t *printNozzleBar = nullptr, *printBedBar = nullptr;
+static lv_obj_t *printNozzleBar = nullptr, *printBedBar = nullptr, *printNozzleTargetMarker = nullptr;
 static lv_obj_t *printPartFanBar = nullptr, *printAuxFanBar = nullptr;
 static lv_obj_t *printModeLabel = nullptr, *printNetworkLabel = nullptr;
+static constexpr int PRINT_NOZZLE_BAR_X = 20, PRINT_NOZZLE_BAR_Y = 306, PRINT_NOZZLE_BAR_W = 200, PRINT_NOZZLE_BAR_H = 14;
+static constexpr int PRINT_NOZZLE_TEMP_MAX = 250;
 static uint8_t warningLevel = 70, criticalLevel = 90;
 static uint32_t backgroundColorValue = 0;
 static uint32_t overpaceColor = 0xDDF542, warningColor = 0xF0A020;
@@ -504,7 +506,18 @@ static void buildPrintScreen(uint32_t bg) {
   lv_obj_set_pos(nozzleCap, 20, 262);
   printNozzleLabel = label(printScreen, "-- C", &lv_font_montserrat_16, C(0xF2F2F2));
   lv_obj_set_pos(printNozzleLabel, 20, 282);
-  printNozzleBar = makePrintBar(printScreen, 20, 306, 200, 14, 0xF0A020);
+  printNozzleBar = makePrintBar(printScreen, PRINT_NOZZLE_BAR_X, PRINT_NOZZLE_BAR_Y, PRINT_NOZZLE_BAR_W, PRINT_NOZZLE_BAR_H, 0xF0A020);
+  lv_bar_set_range(printNozzleBar, 0, PRINT_NOZZLE_TEMP_MAX);
+  printNozzleTargetMarker = lv_obj_create(printScreen);
+  lv_obj_set_size(printNozzleTargetMarker, 3, PRINT_NOZZLE_BAR_H + 6);
+  lv_obj_set_pos(printNozzleTargetMarker, PRINT_NOZZLE_BAR_X, PRINT_NOZZLE_BAR_Y - 3);
+  lv_obj_set_style_bg_color(printNozzleTargetMarker, C(0xFFFFFF), 0);
+  lv_obj_set_style_bg_opa(printNozzleTargetMarker, LV_OPA_COVER, 0);
+  lv_obj_set_style_border_width(printNozzleTargetMarker, 0, 0);
+  lv_obj_set_style_radius(printNozzleTargetMarker, 1, 0);
+  lv_obj_set_style_pad_all(printNozzleTargetMarker, 0, 0);
+  lv_obj_clear_flag(printNozzleTargetMarker, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_add_flag(printNozzleTargetMarker, LV_OBJ_FLAG_HIDDEN);
 
   lv_obj_t *bedCap = label(printScreen, "BED", &lv_font_montserrat_14, C(0x929292));
   lv_obj_set_pos(bedCap, 250, 262);
@@ -1025,7 +1038,7 @@ void displayUpdatePrint(const BambuStatus &status) {
   };
   auto tempBar = [](float current, float target) -> int {
     if (current < 0) return 0;
-    float limit = target > 0 ? target : 300.0f;
+    float limit = target > 0 ? target : 100.0f;
     return constrain((int)lroundf(current * 100.0f / limit), 0, 100);
   };
   String state = status.state.length() ? status.state : "IDLE";
@@ -1078,7 +1091,21 @@ void displayUpdatePrint(const BambuStatus &status) {
   }
   if (printNozzleLabel) lv_label_set_text(printNozzleLabel, tempText(status.nozzleTemp, status.nozzleTarget).c_str());
   if (printBedLabel) lv_label_set_text(printBedLabel, tempText(status.bedTemp, status.bedTarget).c_str());
-  if (printNozzleBar) lv_bar_set_value(printNozzleBar, tempBar(status.nozzleTemp, status.nozzleTarget), LV_ANIM_OFF);
+  if (printNozzleBar) {
+    int actual = status.nozzleTemp >= 0 ? constrain((int)lroundf(status.nozzleTemp), 0, PRINT_NOZZLE_TEMP_MAX) : 0;
+    lv_bar_set_value(printNozzleBar, actual, LV_ANIM_OFF);
+  }
+  if (printNozzleTargetMarker) {
+    if (status.nozzleTarget > 0) {
+      int target = constrain((int)lroundf(status.nozzleTarget), 0, PRINT_NOZZLE_TEMP_MAX);
+      int markerX = PRINT_NOZZLE_BAR_X + (target * PRINT_NOZZLE_BAR_W) / PRINT_NOZZLE_TEMP_MAX - 1;
+      markerX = constrain(markerX, PRINT_NOZZLE_BAR_X, PRINT_NOZZLE_BAR_X + PRINT_NOZZLE_BAR_W - 3);
+      lv_obj_set_pos(printNozzleTargetMarker, markerX, PRINT_NOZZLE_BAR_Y - 3);
+      lv_obj_clear_flag(printNozzleTargetMarker, LV_OBJ_FLAG_HIDDEN);
+    } else {
+      lv_obj_add_flag(printNozzleTargetMarker, LV_OBJ_FLAG_HIDDEN);
+    }
+  }
   if (printBedBar) lv_bar_set_value(printBedBar, tempBar(status.bedTemp, status.bedTarget), LV_ANIM_OFF);
   if (printPartFanLabel) {
     String text = status.partFanPercent >= 0 ? (String(status.partFanPercent) + "%") : "--%";
