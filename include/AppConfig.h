@@ -16,8 +16,11 @@ struct BambuConfig {
   String host;
   String serial;
   String accessCode;
-  String userId;
-  String cloudToken;
+  String account;      // cloud email / username
+  String password;     // cloud password
+  String verifyCode;   // one-time email/SMS code when Bambu asks for verifyCode
+  String userId;       // cached MQTT uid (from login)
+  String cloudToken;   // cached access token (from login)
 };
 
 struct AppConfig {

@@ -250,6 +250,10 @@ void loop(){
   bambu.loop();
   if(bambu.isActive()&&millis()-lastPrintUiMs>=500){
     lastPrintUiMs=millis();
+    if(bambu.takeAuthDirty()){
+      config.bambu=bambu.currentConfig();
+      if(saveConfig(config)) Serial.println("[bambu][nvs] Cached cloud token/user/serial");
+    }
     BambuStatus status=bambu.snapshot();
     displayUpdatePrint(status);
     webUpdatePrint(status);

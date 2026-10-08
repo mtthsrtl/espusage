@@ -1,6 +1,7 @@
 #include "providers/BambuProvider.h"
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
+#include <HTTPClient.h>
 #include <PubSubClient.h>
 #include <ArduinoJson.h>
 
@@ -26,12 +27,19 @@ void BambuClient::mqttCallback(char *topic, byte *payload, unsigned int length) 
   if (activeClient) activeClient->handleMessage(topic, payload, length);
 }
 
+String BambuClient::cloudApiBase() const {
+  return config.region == 1 ? "https://api.bambulab.cn" : "https://api.bambulab.com";
+}
+
 void BambuClient::configure(const BambuConfig &cfg) {
   config = cfg;
-  configured = cfg.enabled && cfg.serial.length() > 0 &&
-               ((cfg.mode == 0 && cfg.host.length() > 0 && cfg.accessCode.length() > 0) ||
-                (cfg.mode == 1 && cfg.userId.length() > 0 && cfg.cloudToken.length() > 0));
   latest.mode = cfg.mode == 1 ? "cloud" : "local";
+  latest.needsVerifyCode = false;
+  bool localOk = cfg.mode == 0 && cfg.host.length() > 0 && cfg.accessCode.length() > 0 && cfg.serial.length() > 0;
+  bool cloudOk = cfg.mode == 1 &&
+                 ((cfg.account.length() > 0 && cfg.password.length() > 0) ||
+                  (cfg.userId.length() > 0 && cfg.cloudToken.length() > 0));
+  configured = cfg.enabled && (localOk || cloudOk);
   if (!configured) {
     setActive(false);
     latest.status = cfg.enabled ? "printer config incomplete" : "disabled";
@@ -49,6 +57,13 @@ void BambuClient::setActive(bool active) {
     latest.status = "disconnected";
     latest.connected = false;
   }
+}
+
+bool BambuClient::takeAuthDirty() {
+  bool dirty = authDirty;
+  authDirty = false;
+  latest.authDirty = false;
+  return dirty;
 }
 
 void BambuClient::disconnect() {
@@ -71,11 +86,205 @@ void BambuClient::requestPushAll() {
   }
 }
 
+bool BambuClient::cloudLogin() {
+  if (!config.account.length()) {
+    latest.status = "cloud account missing";
+    return false;
+  }
+  latest.status = "cloud login...";
+  latest.needsVerifyCode = false;
+  WiFiClientSecure https;
+  https.setInsecure();
+  HTTPClient http;
+  String url = cloudApiBase() + "/v1/user-service/user/login";
+  if (!http.begin(https, url)) {
+    latest.status = "cloud login begin failed";
+    return false;
+  }
+  http.setTimeout(15000);
+  http.addHeader("Content-Type", "application/json");
+  http.addHeader("User-Agent", "espusage/0.9.8");
+
+  JsonDocument body;
+  body["account"] = config.account;
+  if (config.verifyCode.length()) {
+    body["code"] = config.verifyCode;
+  } else {
+    body["password"] = config.password;
+  }
+  body["apiError"] = "";
+  String payload;
+  serializeJson(body, payload);
+  int code = http.POST(payload);
+  String response = http.getString();
+  http.end();
+  Serial.printf("[bambu][cloud] login HTTP %d\n", code);
+  if (code <= 0) {
+    latest.status = "cloud login network error";
+    return false;
+  }
+
+  JsonDocument doc;
+  if (deserializeJson(doc, response)) {
+    latest.status = "cloud login JSON error";
+    return false;
+  }
+
+  String loginType = doc["loginType"] | "";
+  String accessToken = doc["accessToken"] | "";
+  if (!accessToken.length() && loginType == "verifyCode") {
+    latest.needsVerifyCode = true;
+    latest.status = "email verification code required";
+    Serial.println("[bambu][cloud] Bambu asks for verifyCode");
+    return false;
+  }
+  if (!accessToken.length() && loginType == "tfa") {
+    latest.needsVerifyCode = true;
+    latest.status = "2FA code required";
+    return false;
+  }
+  if (!accessToken.length()) {
+    String message = doc["message"] | doc["error"] | "login failed";
+    latest.status = "cloud login: " + message;
+    return false;
+  }
+
+  if (config.cloudToken != accessToken) {
+    config.cloudToken = accessToken;
+    authDirty = true;
+    latest.authDirty = true;
+  }
+  if (config.verifyCode.length()) {
+    config.verifyCode = "";
+    authDirty = true;
+    latest.authDirty = true;
+  }
+  Serial.println("[bambu][cloud] access token received");
+  return true;
+}
+
+bool BambuClient::cloudFetchUserId() {
+  if (config.userId.length()) return true;
+  if (!config.cloudToken.length()) return false;
+  latest.status = "fetching cloud user id...";
+  WiFiClientSecure https;
+  https.setInsecure();
+  HTTPClient http;
+  String url = cloudApiBase() + "/v1/design-user-service/my/preference";
+  if (!http.begin(https, url)) return false;
+  http.setTimeout(15000);
+  http.addHeader("Authorization", "Bearer " + config.cloudToken);
+  http.addHeader("User-Agent", "espusage/0.9.8");
+  int code = http.GET();
+  String response = http.getString();
+  http.end();
+  if (code != 200) {
+    latest.status = "user id HTTP " + String(code);
+    return false;
+  }
+  JsonDocument doc;
+  if (deserializeJson(doc, response)) {
+    latest.status = "user id JSON error";
+    return false;
+  }
+  if (doc["uid"].isNull()) {
+    latest.status = "user id missing";
+    return false;
+  }
+  String uid = String(doc["uid"].as<long long>());
+  if (!uid.length()) return false;
+  config.userId = uid;
+  authDirty = true;
+  latest.authDirty = true;
+  Serial.printf("[bambu][cloud] uid=%s\n", uid.c_str());
+  return true;
+}
+
+bool BambuClient::cloudFillSerialIfNeeded() {
+  if (config.serial.length()) return true;
+  if (!config.cloudToken.length()) return false;
+  latest.status = "fetching printer serial...";
+  WiFiClientSecure https;
+  https.setInsecure();
+  HTTPClient http;
+  String url = cloudApiBase() + "/v1/iot-service/api/user/bind";
+  if (!http.begin(https, url)) return false;
+  http.setTimeout(15000);
+  http.addHeader("Authorization", "Bearer " + config.cloudToken);
+  http.addHeader("User-Agent", "espusage/0.9.8");
+  int code = http.GET();
+  String response = http.getString();
+  http.end();
+  if (code != 200) {
+    latest.status = "device list HTTP " + String(code);
+    return false;
+  }
+  JsonDocument doc;
+  if (deserializeJson(doc, response)) {
+    latest.status = "device list JSON error";
+    return false;
+  }
+  if (!doc["devices"].is<JsonArray>() || doc["devices"].as<JsonArray>().size() == 0) {
+    latest.status = "no cloud printers bound";
+    return false;
+  }
+  JsonArray devices = doc["devices"].as<JsonArray>();
+  String chosen;
+  for (JsonObject device : devices) {
+    String id = device["dev_id"] | "";
+    String product = device["dev_product_name"] | "";
+    String model = device["dev_model_name"] | "";
+    if (!id.length()) continue;
+    if (product.indexOf("A1") >= 0 || model.indexOf("A1") >= 0 || product.indexOf("N2S") >= 0) {
+      chosen = id;
+      break;
+    }
+    if (!chosen.length()) chosen = id;
+  }
+  if (!chosen.length()) {
+    latest.status = "printer serial missing";
+    return false;
+  }
+  config.serial = chosen;
+  authDirty = true;
+  latest.authDirty = true;
+  Serial.printf("[bambu][cloud] serial=%s\n", chosen.c_str());
+  return true;
+}
+
+bool BambuClient::ensureCloudAuth(bool forceLogin) {
+  if (config.mode != 1) return true;
+  if (forceLogin || !config.cloudToken.length()) {
+    if (!config.password.length() && !config.verifyCode.length()) {
+      latest.status = "cloud password missing";
+      return false;
+    }
+    if (!cloudLogin()) return false;
+  }
+  if (!cloudFetchUserId()) {
+    // Token may be stale; retry login once.
+    if (!forceLogin && config.password.length() && cloudLogin()) return cloudFetchUserId() && cloudFillSerialIfNeeded();
+    return false;
+  }
+  return cloudFillSerialIfNeeded();
+}
+
 void BambuClient::connect() {
   if (!configured || WiFi.status() != WL_CONNECTED) return;
   uint32_t now = millis();
-  if (lastConnectAttemptMs && now - lastConnectAttemptMs < 5000) return;
+  if (lastConnectAttemptMs && now - lastConnectAttemptMs < 8000) return;
   lastConnectAttemptMs = now;
+
+  if (config.mode == 1 && !ensureCloudAuth(false)) {
+    latest.connected = false;
+    latest.ok = false;
+    return;
+  }
+  if (!config.serial.length()) {
+    latest.status = "printer serial missing";
+    latest.connected = false;
+    return;
+  }
 
   disconnect();
   activeClient = this;
@@ -100,8 +309,14 @@ void BambuClient::connect() {
   if (!mqttClient.connect(clientId.c_str(), username.c_str(), password.c_str())) {
     latest.connected = false;
     latest.ok = false;
-    latest.status = "mqtt connect failed: " + String(mqttClient.state());
-    Serial.printf("[bambu][mqtt] Connect failed, state=%d\n", mqttClient.state());
+    int state = mqttClient.state();
+    latest.status = "mqtt connect failed: " + String(state);
+    Serial.printf("[bambu][mqtt] Connect failed, state=%d\n", state);
+    if (config.mode == 1 && config.password.length()) {
+      Serial.println("[bambu][cloud] Retrying login after MQTT failure");
+      config.cloudToken = "";
+      ensureCloudAuth(true);
+    }
     return;
   }
 
@@ -113,6 +328,7 @@ void BambuClient::connect() {
     return;
   }
   latest.connected = true;
+  latest.needsVerifyCode = false;
   latest.status = "waiting for status";
   Serial.printf("[bambu][mqtt] Subscribed to %s\n", report.c_str());
   requestPushAll();
@@ -205,8 +421,6 @@ void BambuClient::handleMessage(const char *topic, const uint8_t *payload, unsig
   } else {
     latest.status = "online";
   }
-  Serial.printf("[bambu][mqtt] %s file=%s layer=%d/%d\n", latest.status.c_str(), latest.fileName.c_str(),
-                latest.layer, latest.totalLayers);
 }
 
 void BambuClient::loop() {
@@ -221,4 +435,8 @@ void BambuClient::loop() {
   if (millis() - lastPushAllMs > 60000UL) requestPushAll();
 }
 
-BambuStatus BambuClient::snapshot() const { return latest; }
+BambuStatus BambuClient::snapshot() const {
+  BambuStatus copy = latest;
+  copy.authDirty = authDirty;
+  return copy;
+}

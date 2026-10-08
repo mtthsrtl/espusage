@@ -162,6 +162,14 @@ Tested with PlatformIO `espressif32@6.12.0`, Arduino-ESP32 2.0.17, Arduino_GFX 1
 | `/api/display?mode=toggle\|used\|remaining` | GET | Change the displayed usage mode |
 | `/api/display/toggle` | GET/POST | Toggle the physical display backlight and return its new state |
 | `/api/view?screen=usage\|print\|toggle` | GET | Switch the physical display between usage and Bambu print screens (no API key; boot always starts on usage; MQTT only while print is active) |
+
+### Bambu Cloud setup (no LAN Only)
+
+1. Open the device web UI → **General** → **Bambu Lab A1**.
+2. Enable the print screen, choose **Bambu Cloud**, region **Global**.
+3. Enter your Bambu account **email** and **password**. Serial is optional; if empty the first bound printer (preferring A1) is taken from the cloud.
+4. Save and restart. Open `/api/view?screen=print`.
+5. If the status shows that a verification code is required, enter the email code in the same form, save again, then open the print screen once more.
 | `/api/config` | POST | Save settings to NVS and restart |
 | `/api/wifi/scan` | GET | Scan nearby Wi-Fi networks |
 | `/api/wifi` | POST | Save selected Wi-Fi credentials and restart |

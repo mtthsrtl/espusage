@@ -56,6 +56,9 @@ bool loadConfig(AppConfig &c) {
   c.bambu.host = prefs.getString("bambu_host", "");
   c.bambu.serial = prefs.getString("bambu_serial", "");
   c.bambu.accessCode = prefs.getString("bambu_code", "");
+  c.bambu.account = prefs.getString("bambu_acct", "");
+  c.bambu.password = prefs.getString("bambu_pw", "");
+  c.bambu.verifyCode = prefs.getString("bambu_vcode", "");
   c.bambu.userId = prefs.getString("bambu_user", "");
   c.bambu.cloudToken = prefs.getString("bambu_token", "");
   prefs.end();
@@ -105,6 +108,9 @@ bool saveConfig(const AppConfig &c) {
   prefs.putString("bambu_host", c.bambu.host);
   prefs.putString("bambu_serial", c.bambu.serial);
   prefs.putString("bambu_code", c.bambu.accessCode);
+  prefs.putString("bambu_acct", c.bambu.account);
+  prefs.putString("bambu_pw", c.bambu.password);
+  prefs.putString("bambu_vcode", c.bambu.verifyCode);
   prefs.putString("bambu_user", c.bambu.userId);
   prefs.putString("bambu_token", c.bambu.cloudToken);
   prefs.putUChar("ui_ver", UI_CONFIG_VERSION);
