@@ -63,12 +63,26 @@ if ($Provider -in @("Cursor", "Both")) {
     if (-not (Test-Path -LiteralPath $cursorDbPath)) {
         throw "Cursor state database not found: $cursorDbPath"
     }
-    $cursorReader = 'import sqlite3,sys; row=sqlite3.connect(sys.argv[1]).execute("SELECT value FROM ItemTable WHERE key=''cursorAuth/accessToken''").fetchone(); print(row[0] if row else "")'
-    $cursorToken = (& python -c $cursorReader $cursorDbPath).Trim()
-    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($cursorToken)) {
-        throw "No Cursor access token could be read. Make sure Python and Cursor are installed."
+    # PowerShell mangles nested quotes in `python -c`; use a temp script instead.
+    $cursorPy = Join-Path ([System.IO.Path]::GetTempPath()) ("espusage-cursor-token-{0}.py" -f [guid]::NewGuid().ToString("n"))
+    $cursorPyBody = @'
+import sqlite3, sys
+db = sqlite3.connect(sys.argv[1])
+row = db.execute("SELECT value FROM ItemTable WHERE key='cursorAuth/accessToken'").fetchone()
+print(row[0] if row else "")
+'@
+    [System.IO.File]::WriteAllText($cursorPy, $cursorPyBody)
+    try {
+        $cursorOut = & python $cursorPy $cursorDbPath 2>&1
+        $cursorToken = ($cursorOut | Out-String).Trim()
+        if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($cursorToken) -or $cursorToken -match '(?i)traceback|syntaxerror') {
+            throw "No Cursor access token could be read. Make sure Python and Cursor are installed. Details: $cursorToken"
+        }
+        $body.cursor_token = $cursorToken
     }
-    $body.cursor_token = $cursorToken
+    finally {
+        Remove-Item -LiteralPath $cursorPy -Force -ErrorAction SilentlyContinue
+    }
 }
 
 $result = Invoke-RestMethod -Uri "$DeviceUrl/api/tokens" -Method Post -ContentType "application/x-www-form-urlencoded" -Body $body
