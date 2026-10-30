@@ -23,6 +23,16 @@ struct BambuConfig {
   String cloudToken;   // cached access token (from login)
 };
 
+struct MqttConfig {
+  bool enabled = false;
+  bool discovery = true;
+  uint16_t port = 1883;
+  String host;
+  String user;
+  String password;
+  String prefix = "espusage";
+};
+
 struct AppConfig {
   String wifiSsid;
   String wifiPassword;
@@ -31,6 +41,7 @@ struct AppConfig {
   ProviderConfig codex;
   ProviderConfig cursor;
   BambuConfig bambu;
+  MqttConfig mqtt;
   String tokenApiKey;
   bool codexCreditsFallback = false;
   uint8_t brightness = 85;

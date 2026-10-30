@@ -61,6 +61,15 @@ bool loadConfig(AppConfig &c) {
   c.bambu.verifyCode = prefs.getString("bambu_vcode", "");
   c.bambu.userId = prefs.getString("bambu_user", "");
   c.bambu.cloudToken = prefs.getString("bambu_token", "");
+  c.mqtt.enabled = prefs.getBool("mqtt_on", false);
+  c.mqtt.discovery = prefs.getBool("mqtt_disc", true);
+  c.mqtt.port = prefs.getUShort("mqtt_port", 1883);
+  if (c.mqtt.port == 0) c.mqtt.port = 1883;
+  c.mqtt.host = prefs.getString("mqtt_host", "");
+  c.mqtt.user = prefs.getString("mqtt_user", "");
+  c.mqtt.password = prefs.getString("mqtt_pw", "");
+  c.mqtt.prefix = prefs.getString("mqtt_prefix", "espusage");
+  if (!c.mqtt.prefix.length()) c.mqtt.prefix = "espusage";
   prefs.end();
   if (uiConfigVersion < UI_CONFIG_VERSION && prefs.begin("espusage", false)) {
     prefs.remove("codex_evt_url");
@@ -113,6 +122,13 @@ bool saveConfig(const AppConfig &c) {
   prefs.putString("bambu_vcode", c.bambu.verifyCode);
   prefs.putString("bambu_user", c.bambu.userId);
   prefs.putString("bambu_token", c.bambu.cloudToken);
+  prefs.putBool("mqtt_on", c.mqtt.enabled);
+  prefs.putBool("mqtt_disc", c.mqtt.discovery);
+  prefs.putUShort("mqtt_port", c.mqtt.port ? c.mqtt.port : 1883);
+  prefs.putString("mqtt_host", c.mqtt.host);
+  prefs.putString("mqtt_user", c.mqtt.user);
+  prefs.putString("mqtt_pw", c.mqtt.password);
+  prefs.putString("mqtt_prefix", c.mqtt.prefix.length() ? c.mqtt.prefix : "espusage");
   prefs.putUChar("ui_ver", UI_CONFIG_VERSION);
   prefs.end();
   return true;

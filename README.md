@@ -14,7 +14,7 @@ Native, standalone firmware for the 4-inch GUITION ESP32-S3 4848S040 (480×480),
 - Browser-based Wi-Fi scan, network selection, password entry, and NVS-backed reset/reconfiguration
 - Local web configuration at `http://espusage.local/` or the IP shown on screen
 - Runtime configuration stored in ESP32 NVS; provider secrets are not compiled into firmware or returned by diagnostics
-- Browser-upload OTA page, dual OTA partitions, `/api/health`, redacted `/api/status`, sanitized live `/api/usage`, live `/api/touch` diagnostics, and a separate Bambu A1 print screen switched via `/api/view`
+- Browser-upload OTA page, dual OTA partitions, `/api/health`, redacted `/api/status`, sanitized live `/api/usage`, flat Home Assistant endpoints under `/api/ha/*`, optional MQTT Discovery publish to an existing broker, live `/api/touch` diagnostics, and a separate Bambu A1 print screen switched via `/api/view`
 - Separate transport, Codex adapter, and Cursor provider modules
 
 The display uses the 4848S040 RGB pinout: GPIO 39/48/47 for panel control, GPIO 18/17/16/21 for timing, GPIO 19/45 for GT911 touch, and GPIO 38 for the backlight. Arduino_GFX is configured with 10/8/50 horizontal and 10/8/20 vertical porch/pulse values at a 10 MHz pixel clock.
@@ -155,6 +155,10 @@ Tested with PlatformIO `espressif32@6.12.0`, Arduino-ESP32 2.0.17, Arduino_GFX 1
 | `/api/health` | GET | Minimal liveness response |
 | `/api/status` | GET | Redacted runtime/debug status |
 | `/api/usage` | GET | Current sanitized provider limits and 30-minute buckets; does not intentionally include stored secrets |
+| `/api/ha/sensors` | GET | Flat key/value JSON of all Cursor, Codex, and device sensors for Home Assistant REST |
+| `/api/ha/cursor` | GET | Flat Cursor sensors only |
+| `/api/ha/codex` | GET | Flat Codex sensors only |
+| `/api/ha/device` | GET | Flat device meta sensors only |
 | `/api/usage/refresh` | GET/POST | Queue an immediate refresh of Codex and Cursor limits |
 | `/api/tokens` | POST | Update supplied Codex/Cursor credentials in NVS using the configured API key and queue an immediate usage refresh; response never includes credential values |
 | `/api/reboot` | POST | Restart the device using the configured API key |
@@ -187,6 +191,25 @@ To select interactively whether Codex, Cursor, or both should be read from the l
 ```
 
 For unattended use, pass `-Provider Codex`, `-Provider Cursor`, or `-Provider Both`. The API key can be entered in `$TokenWebhookApiKey` near the top of the script, supplied with `-ApiKey`, or set through the `ESPUSAGE_TOKEN_API_KEY` environment variable. Do not commit a real key to a public repository.
+
+### Home Assistant
+
+Poll the flat HTTP API (open on the LAN, no API key):
+
+```yaml
+rest:
+  - resource: http://espusage.local/api/ha/sensors
+    scan_interval: 60
+    sensor:
+      - name: ESP Cursor Models Used
+        value_template: "{{ value_json.cursor_models_used_percent }}"
+        unit_of_measurement: "%"
+      - name: ESP Codex 5h Used
+        value_template: "{{ value_json.codex_5h_used_percent }}"
+        unit_of_measurement: "%"
+```
+
+Or enable **Home Assistant MQTT** in the web UI (broker host/port/user/password, topic prefix, Discovery). The device publishes retained state topics `{prefix}/{hostname}/{sensor}` and MQTT Discovery configs so entities appear automatically. Availability topic: `{prefix}/{hostname}/status`.
 
 Set the token webhook API key once in the General web settings. Because the device serves plain HTTP, use this only on a trusted local network and do not expose the endpoint through port forwarding.
 
