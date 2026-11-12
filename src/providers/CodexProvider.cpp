@@ -27,7 +27,7 @@ UsageSnapshot CodexProvider::fetch(const ProviderConfig &cfg, bool tls) {
   if (!cfg.enabled) { out.status="disabled"; return out; }
   bool direct=cfg.endpoint.length()==0;
   if (direct && !cfg.token.length()) { out.status="Codex access_token missing"; return out; }
-  String url=direct?"https://chatgpt.com/backend-api/wham/usage":cfg.endpoint;
+  String url=direct?"https://chatgpt.com/backend-api/codex/usage":cfg.endpoint;
   JsonDocument d; String error;
   if (!getJson(url, cfg, tls, d, error)) { out.status=error; return out; }
   if (direct) {
