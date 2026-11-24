@@ -117,7 +117,20 @@ function Start-InteractiveClaudeLogin([string]$path) {
     Write-Host "After login, the page shows an authorization code."
     Write-Host "Paste the FULL code (often looks like CODE#STATE) below."
     Write-Host ""
-    Start-Process $url | Out-Null
+    Write-Host "Login URL (open manually if the browser does not start):"
+    Write-Host $url
+    Write-Host ""
+    $opened = $false
+    foreach ($opener in @(
+        { param($u) Start-Process -FilePath "cmd.exe" -ArgumentList @("/c", "start", "", $u) -WindowStyle Hidden },
+        { param($u) Start-Process -FilePath "rundll32.exe" -ArgumentList @("url.dll,FileProtocolHandler", $u) },
+        { param($u) [System.Diagnostics.Process]::Start($u) | Out-Null }
+    )) {
+        try { & $opener $url; $opened = $true; break } catch { }
+    }
+    if (-not $opened) {
+        Write-Host "Could not auto-open a browser. Copy the URL above into Chrome/Edge."
+    }
 
     $raw = Read-Host "Paste authorization code"
     $raw = $raw.Trim().Trim("'").Trim('"')
