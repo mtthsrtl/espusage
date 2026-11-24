@@ -4,7 +4,8 @@
 
 static const char *requestLabel(const String &url) {
   if (url.indexOf("chatgpt.com") >= 0) return "codex";
-  if (url.indexOf("claude.ai") >= 0) return "claude";
+  if (url.indexOf("claude.ai") >= 0 || url.indexOf("api.anthropic.com") >= 0 || url.indexOf("platform.claude.com") >= 0)
+    return "claude";
   if (url.indexOf("cursor.com") >= 0 || url.indexOf("cursor.sh") >= 0) return "cursor";
   return "adapter";
 }
@@ -23,7 +24,9 @@ static bool request(const String &method, const String &url, const ProviderConfi
     HTTPClient http;
     if (!http.begin(secureClient, url)) { error = "connection setup failed"; return false; }
     http.setConnectTimeout(12000); http.setTimeout(20000); http.setReuse(false);
-    http.setUserAgent("ESPUsage/1.0"); http.addHeader("Accept", "application/json");
+    const bool claudeOauth = url.indexOf("api.anthropic.com/api/oauth/") >= 0;
+    http.setUserAgent(claudeOauth ? "claude-code/2.0.0" : "ESPUsage/1.0");
+    http.addHeader("Accept", "application/json");
     http.addHeader("Connection", "close");
     if (url.indexOf("api2.cursor.sh/aiserver.v1.DashboardService/") >= 0)
       http.addHeader("Connect-Protocol-Version", "1");
@@ -35,6 +38,7 @@ static bool request(const String &method, const String &url, const ProviderConfi
       http.addHeader("Origin", "https://claude.ai");
       http.addHeader("Referer", "https://claude.ai/settings/usage");
     }
+    if (claudeOauth) http.addHeader("anthropic-beta", "oauth-2025-04-20");
     if (cfg.token.length()) http.addHeader("Authorization", "Bearer " + cfg.token);
     if (cfg.accountId.length() && url.indexOf("chatgpt.com") >= 0) http.addHeader("ChatGPT-Account-Id", cfg.accountId);
     if (cfg.session.length()) http.addHeader("Cookie", cfg.session);

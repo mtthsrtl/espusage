@@ -3,13 +3,22 @@
 #include <ArduinoJson.h>
 #include <time.h>
 
-static String normalizeSessionKey(String value) {
+static String normalizeToken(String value) {
   value.trim();
+  if (value.startsWith("Bearer ")) value.remove(0, 7);
   if (value.startsWith("sessionKey=")) value.remove(0, 11);
   int cut = value.indexOf(';');
   if (cut >= 0) value = value.substring(0, cut);
   value.trim();
   return value;
+}
+
+static bool isOAuthAccessToken(const String &token) {
+  return token.startsWith("sk-ant-oat") || token.startsWith("sk-ant-api");
+}
+
+static bool isSessionCookieToken(const String &token) {
+  return token.startsWith("sk-ant-sid");
 }
 
 static time_t parseIsoUtc(const char *text) {
@@ -23,7 +32,6 @@ static time_t parseIsoUtc(const char *text) {
   t.tm_hour = hour;
   t.tm_min = minute;
   t.tm_sec = second;
-  // Temporarily switch to UTC so mktime interprets the Claude resets_at stamp correctly.
   char *previous = getenv("TZ");
   String previousTz = previous ? previous : "";
   setenv("TZ", "UTC0", 1);
@@ -49,40 +57,55 @@ static void readUtilization(JsonVariant source, UsageWindow &target, uint32_t wi
                             : "reset in " + String(hours) + "h " + String(minutes) + "m";
     if (windowSeconds && remaining <= windowSeconds)
       target.elapsedPercent = constrain(100.0f - (100.0f * remaining / windowSeconds), 0.0f, 100.0f);
-  } else {
+  } else if (target.usedPercent >= 0) {
     target.resetText = "reset time unavailable";
   }
 }
 
-static String resolveOrgId(const ProviderConfig &cfg, bool tls, String &error) {
-  if (cfg.accountId.length()) return cfg.accountId;
-  JsonDocument orgs;
+static void fillFromUsageDocument(JsonDocument &d, UsageSnapshot &out, const char *statusOk) {
+  readUtilization(d["five_hour"], out.primary, 5 * 3600);
+  readUtilization(d["seven_day"], out.secondary, 7 * 86400);
+  JsonArray limits = d["limits"].as<JsonArray>();
+  for (JsonObject limit : limits) {
+    String type = String((const char *)(limit["type"] | limit["id"] | limit["kind"] | ""));
+    type.toLowerCase();
+    if ((type.indexOf("five") >= 0 || type.indexOf("5_hour") >= 0 || type.indexOf("5h") >= 0 || type.indexOf("session") >= 0) &&
+        out.primary.usedPercent < 0)
+      readUtilization(limit, out.primary, 5 * 3600);
+    if ((type.indexOf("seven") >= 0 || type.indexOf("week") >= 0 || type.indexOf("7_day") >= 0) &&
+        out.secondary.usedPercent < 0)
+      readUtilization(limit, out.secondary, 7 * 86400);
+  }
+  JsonVariant extra = d["extra_usage"];
+  if (!extra.isNull() && (extra["is_enabled"] | false)) {
+    float used = extra["used_credits"] | -1.0f;
+    if (used >= 0) out.credits = used;
+  }
+  const char *plan = d["plan_type"] | d["plan"] | "";
+  if (plan[0]) out.plan = plan;
+  else if (out.primary.usedPercent >= 0 || out.secondary.usedPercent >= 0) out.plan = "Claude";
+  out.ok = out.primary.usedPercent >= 0 || out.secondary.usedPercent >= 0;
+  out.status = out.ok ? statusOk : "usage fields missing";
+}
+
+static UsageSnapshot fetchOAuthUsage(const ProviderConfig &cfg, bool tls, const String &accessToken) {
+  UsageSnapshot out;
+  out.provider = "Claude";
+  out.primary.label = "5-HOUR LIMIT";
+  out.secondary.label = "WEEKLY LIMIT";
   ProviderConfig request = cfg;
-  request.token = "";
-  request.session = "sessionKey=" + normalizeSessionKey(cfg.token);
-  if (!getJson("https://claude.ai/api/organizations", request, tls, orgs, error)) return "";
-  JsonArray list = orgs.as<JsonArray>();
-  if (list.isNull()) {
-    // Some responses wrap the list.
-    list = orgs["organizations"].as<JsonArray>();
+  request.token = accessToken;
+  request.session = "";
+  JsonDocument d;
+  String error;
+  if (!getJson("https://api.anthropic.com/api/oauth/usage", request, tls, d, error)) {
+    out.status = error;
+    if (error == "HTTP 401" || error == "HTTP 403")
+      out.status = error + " (Claude OAuth token invalid/expired - re-run PC helper)";
+    return out;
   }
-  String chatOrg, fallback;
-  for (JsonObject org : list) {
-    String uuid = String((const char *)(org["uuid"] | ""));
-    if (!uuid.length()) continue;
-    if (!fallback.length()) fallback = uuid;
-    JsonArray caps = org["capabilities"].as<JsonArray>();
-    bool chat = false;
-    for (JsonVariant cap : caps) {
-      String name = cap.as<String>();
-      if (name == "chat" || name.indexOf("claude") >= 0) { chat = true; break; }
-    }
-    if (chat) { chatOrg = uuid; break; }
-  }
-  if (chatOrg.length()) return chatOrg;
-  if (fallback.length()) return fallback;
-  error = "Claude organization missing";
-  return "";
+  fillFromUsageDocument(d, out, "online (Claude OAuth)");
+  return out;
 }
 
 UsageSnapshot ClaudeProvider::fetch(const ProviderConfig &cfg, bool tls) {
@@ -91,51 +114,21 @@ UsageSnapshot ClaudeProvider::fetch(const ProviderConfig &cfg, bool tls) {
   out.primary.label = "5-HOUR LIMIT";
   out.secondary.label = "WEEKLY LIMIT";
   if (!cfg.enabled) { out.status = "disabled"; return out; }
-  String sessionKey = normalizeSessionKey(cfg.token);
-  if (!sessionKey.length()) { out.status = "Claude sessionKey missing"; return out; }
 
-  ProviderConfig request = cfg;
-  request.token = "";
-  request.session = "sessionKey=" + sessionKey;
+  String token = normalizeToken(cfg.token);
+  if (!token.length()) { out.status = "Claude OAuth token missing"; return out; }
 
-  String error;
-  bool discoveredOrg = !cfg.accountId.length();
-  String orgId = resolveOrgId(request, tls, error);
-  if (!orgId.length()) {
-    out.status = error.length() ? error : "Claude organization missing";
+  // Browser sessionKey cookies are blocked by Cloudflare for non-browser TLS
+  // (ESP and PowerShell). Prefer Claude Code OAuth against api.anthropic.com.
+  if (isSessionCookieToken(token)) {
+    out.status = "HTTP 403 (sessionKey blocked by Cloudflare - use Claude Code OAuth via PC helper)";
     return out;
   }
-  // When accountId was empty, stash the resolved org UUID here so main can persist it.
-  if (discoveredOrg) out.updated = orgId;
 
-  String url = "https://claude.ai/api/organizations/" + orgId + "/usage";
-  JsonDocument d;
-  if (!getJson(url, request, tls, d, error)) { out.status = error; return out; }
-
-  readUtilization(d["five_hour"], out.primary, 5 * 3600);
-  readUtilization(d["seven_day"], out.secondary, 7 * 86400);
-  // Newer settings pages also expose a limits array — fill gaps only.
-  JsonArray limits = d["limits"].as<JsonArray>();
-  for (JsonObject limit : limits) {
-    String type = String((const char *)(limit["type"] | limit["id"] | ""));
-    type.toLowerCase();
-    if ((type.indexOf("five") >= 0 || type.indexOf("5_hour") >= 0 || type.indexOf("5h") >= 0) && out.primary.usedPercent < 0)
-      readUtilization(limit, out.primary, 5 * 3600);
-    if ((type.indexOf("seven") >= 0 || type.indexOf("week") >= 0 || type.indexOf("7_day") >= 0) && out.secondary.usedPercent < 0)
-      readUtilization(limit, out.secondary, 7 * 86400);
+  if (isOAuthAccessToken(token) || !isSessionCookieToken(token)) {
+    return fetchOAuthUsage(cfg, tls, token);
   }
 
-  JsonVariant extra = d["extra_usage"];
-  if (!extra.isNull() && (extra["is_enabled"] | false)) {
-    float used = extra["used_credits"] | -1.0f;
-    if (used >= 0) out.credits = used;
-  }
-
-  const char *plan = d["plan_type"] | d["plan"] | "";
-  if (plan[0]) out.plan = plan;
-  else if ((d["five_hour"].isNull() == false) || (d["seven_day"].isNull() == false)) out.plan = "Claude";
-
-  out.ok = out.primary.usedPercent >= 0 || out.secondary.usedPercent >= 0;
-  out.status = out.ok ? "online (Claude session)" : "usage fields missing";
+  out.status = "unsupported Claude credential";
   return out;
 }

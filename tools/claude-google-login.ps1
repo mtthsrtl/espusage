@@ -1,64 +1,97 @@
 param(
     [string]$DeviceUrl = "http://192.168.178.123",
-    [string]$SessionKey,
-    [string]$OrgId
+    [string]$AccessToken,
+    [string]$CredentialsPath = "$env:USERPROFILE\.claude\.credentials.json"
 )
 
 $ErrorActionPreference = "Stop"
 $DeviceUrl = $DeviceUrl.TrimEnd("/")
+$ClientId = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
 
-Write-Host "Claude Google login helper for ESP Usage"
-Write-Host "1) Browser opens claude.ai login - complete Google sign-in there."
-Write-Host "2) Paste the sessionKey cookie (DevTools > Application > Cookies > sessionKey),"
-Write-Host "   or leave blank if you already pushed via the web-UI bookmarklet."
+Write-Host "Claude OAuth helper for ESP Usage"
+Write-Host "Browser sessionKey cookies get HTTP 403 from Cloudflare outside Chrome/Edge."
+Write-Host "This script pushes a Claude Code OAuth access token (sk-ant-oat...) instead."
 Write-Host ""
 
-Start-Process "https://claude.ai/login" | Out-Null
-Read-Host "Press Enter after Google login on claude.ai finished"
-
-if ([string]::IsNullOrWhiteSpace($SessionKey)) {
-    $SessionKey = Read-Host "Paste sessionKey cookie value (sk-ant-sid01-...)"
-}
-$SessionKey = $SessionKey.Trim()
-if ($SessionKey.StartsWith("sessionKey=")) { $SessionKey = $SessionKey.Substring(11) }
-if ($SessionKey.Contains(";")) { $SessionKey = $SessionKey.Split(";")[0].Trim() }
-if ([string]::IsNullOrWhiteSpace($SessionKey)) { throw "sessionKey is required." }
-
-$headers = @{
-    "Cookie"  = "sessionKey=$SessionKey"
-    "Referer" = "https://claude.ai/settings/usage"
-    "Origin"  = "https://claude.ai"
-    "Accept"  = "application/json"
+function Save-ClaudeCredentials($cred, $path) {
+    $json = $cred | ConvertTo-Json -Depth 8
+    [System.IO.File]::WriteAllText($path, $json)
 }
 
-if ([string]::IsNullOrWhiteSpace($OrgId)) {
-    Write-Host "Resolving Claude organization..."
-    try {
-        $orgs = Invoke-RestMethod -Method Get -Uri "https://claude.ai/api/organizations" -Headers $headers
-    } catch {
-        throw "Could not list organizations (session may be invalid): $($_.Exception.Message)"
+function Get-RefreshedAccessToken([string]$path) {
+    if (-not (Test-Path $path)) {
+        throw "Claude Code credentials not found at $path. Install/login Claude Code once, then re-run."
     }
-    $list = @()
-    if ($orgs -is [System.Array]) { $list = $orgs }
-    elseif ($orgs.organizations) { $list = @($orgs.organizations) }
-    else { $list = @($orgs) }
+    $cred = Get-Content $path -Raw | ConvertFrom-Json
+    if (-not $cred.claudeAiOauth -or -not $cred.claudeAiOauth.refreshToken) {
+        throw "No claudeAiOauth.refreshToken in $path. Run Claude Code login first."
+    }
 
-    $chat = $list | Where-Object {
-        $caps = @($_.capabilities)
-        ($caps -contains "chat") -or (($caps | ForEach-Object { "$_" }) -match "claude")
-    } | Select-Object -First 1
-    if (-not $chat) { $chat = $list | Select-Object -First 1 }
-    if (-not $chat -or -not $chat.uuid) { throw "No Claude organization found for this session." }
-    $OrgId = [string]$chat.uuid
-    Write-Host "Using organization $OrgId"
+    $nowMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+    $expiresAt = [int64]$cred.claudeAiOauth.expiresAt
+    $access = [string]$cred.claudeAiOauth.accessToken
+    if ($access -and $expiresAt -gt ($nowMs + 120000)) {
+        Write-Host "Using existing Claude Code access token (still valid)."
+        return $access
+    }
+
+    Write-Host "Refreshing Claude Code OAuth token..."
+    $body = @{
+        grant_type    = "refresh_token"
+        refresh_token = [string]$cred.claudeAiOauth.refreshToken
+        client_id     = $ClientId
+    } | ConvertTo-Json -Compress
+
+    try {
+        $tok = Invoke-RestMethod -Method Post -Uri "https://platform.claude.com/v1/oauth/token" `
+            -ContentType "application/json" -Body $body `
+            -Headers @{ "anthropic-beta" = "oauth-2025-04-20"; "User-Agent" = "claude-code/2.0.0" }
+    } catch {
+        $detail = $_.Exception.Message
+        if ($_.ErrorDetails.Message) { $detail = $_.ErrorDetails.Message }
+        throw @"
+Token refresh failed: $detail
+
+Fix: open Claude Code (or run 'claude'), complete Google login there, then re-run:
+  $($MyInvocation.MyCommand.Path) -DeviceUrl $DeviceUrl
+"@
+    }
+
+    $cred.claudeAiOauth.accessToken = [string]$tok.access_token
+    if ($tok.refresh_token) { $cred.claudeAiOauth.refreshToken = [string]$tok.refresh_token }
+    $cred.claudeAiOauth.expiresAt = [int64]($nowMs + ([int]$tok.expires_in * 1000))
+    Save-ClaudeCredentials $cred $path
+    Write-Host "Refresh OK; credentials file updated."
+    return [string]$tok.access_token
 }
 
-$body = @{
-    session_key = $SessionKey
-    org_id      = $OrgId
+if ([string]::IsNullOrWhiteSpace($AccessToken)) {
+    $AccessToken = Get-RefreshedAccessToken $CredentialsPath
+} else {
+    $AccessToken = $AccessToken.Trim()
+    if ($AccessToken.StartsWith("Bearer ")) { $AccessToken = $AccessToken.Substring(7).Trim() }
 }
 
-Write-Host "Pushing Claude session to $DeviceUrl ..."
-$result = Invoke-RestMethod -Method Post -Uri "$DeviceUrl/api/claude/session" -Body $body -ContentType "application/x-www-form-urlencoded"
+if ($AccessToken.StartsWith("sk-ant-sid")) {
+    throw "sessionKey cookies cannot be used (Cloudflare 403). Use Claude Code OAuth (sk-ant-oat...)."
+}
+if (-not $AccessToken.StartsWith("sk-ant-oat")) {
+    Write-Host "Warning: token does not start with sk-ant-oat; pushing anyway."
+}
+
+Write-Host "Verifying usage endpoint..."
+$usage = Invoke-RestMethod -Method Get -Uri "https://api.anthropic.com/api/oauth/usage" -Headers @{
+    Authorization     = "Bearer $AccessToken"
+    "anthropic-beta"  = "oauth-2025-04-20"
+    "User-Agent"      = "claude-code/2.0.0"
+    Accept            = "application/json"
+}
+Write-Host ("Usage OK: 5h={0}% weekly={1}%" -f $usage.five_hour.utilization, $usage.seven_day.utilization)
+
+Write-Host "Pushing OAuth token to $DeviceUrl ..."
+$result = Invoke-RestMethod -Method Post -Uri "$DeviceUrl/api/claude/session" -Body @{
+    session_key = $AccessToken
+    oauth_token = $AccessToken
+} -ContentType "application/x-www-form-urlencoded"
 $result | ConvertTo-Json -Compress
-Write-Host "Done. The device will refresh usage shortly."
+Write-Host "Done. Device will refresh Claude usage shortly."
