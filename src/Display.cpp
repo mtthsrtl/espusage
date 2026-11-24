@@ -348,6 +348,8 @@ static String formatTokens(uint64_t value) {
 static String formatPlanBadge(String plan) {
   plan.trim(); plan.toUpperCase(); plan.replace("_", " "); plan.replace("-", " ");
   if (plan == "PRO PLUS" || plan == "PROPLUS") return "PRO+";
+  if (plan == "CLAUDE PRO" || plan == "CLAUDE_PRO") return "PRO";
+  if (plan == "CLAUDE MAX" || plan == "CLAUDE_MAX") return "MAX";
   if (plan.length() > 12) plan = plan.substring(0, 12);
   return plan;
 }

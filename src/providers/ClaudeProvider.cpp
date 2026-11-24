@@ -83,9 +83,30 @@ static void fillFromUsageDocument(JsonDocument &d, UsageSnapshot &out, const cha
   }
   const char *plan = d["plan_type"] | d["plan"] | "";
   if (plan[0]) out.plan = plan;
-  else if (out.primary.usedPercent >= 0 || out.secondary.usedPercent >= 0) out.plan = "Claude";
   out.ok = out.primary.usedPercent >= 0 || out.secondary.usedPercent >= 0;
   out.status = out.ok ? statusOk : "usage fields missing";
+}
+
+static String planFromProfile(JsonDocument &profile) {
+  JsonObject account = profile["account"].as<JsonObject>();
+  JsonObject organization = profile["organization"].as<JsonObject>();
+  if (!account.isNull()) {
+    if (account["has_claude_max"] | false) return "MAX";
+    if (account["has_claude_pro"] | false) return "PRO";
+  }
+  String orgType = String((const char *)(organization["organization_type"] | ""));
+  orgType.toLowerCase();
+  if (orgType.indexOf("max") >= 0) return "MAX";
+  if (orgType.indexOf("pro") >= 0) return "PRO";
+  if (orgType.indexOf("team") >= 0) return "TEAM";
+  if (orgType.indexOf("enterprise") >= 0) return "ENT";
+  if (orgType.length()) {
+    orgType.replace("claude_", "");
+    orgType.replace("_", " ");
+    orgType.toUpperCase();
+    return orgType;
+  }
+  return "";
 }
 
 static UsageSnapshot fetchOAuthUsage(const ProviderConfig &cfg, bool tls, const String &accessToken) {
@@ -105,6 +126,17 @@ static UsageSnapshot fetchOAuthUsage(const ProviderConfig &cfg, bool tls, const 
     return out;
   }
   fillFromUsageDocument(d, out, "online (Claude OAuth)");
+  JsonDocument profile;
+  String profileError;
+  if (getJson("https://api.anthropic.com/api/oauth/profile", request, tls, profile, profileError)) {
+    String plan = planFromProfile(profile);
+    if (plan.length()) out.plan = plan;
+    String orgId = String((const char *)(profile["organization"]["uuid"] | ""));
+    if (orgId.length() && !cfg.accountId.length()) out.updated = orgId;
+  } else if (!out.plan.length() || out.plan == "Claude") {
+    // Keep usage bars even if profile fails; leave badge empty rather than "CLAUDE".
+    out.plan = "";
+  }
   return out;
 }
 
