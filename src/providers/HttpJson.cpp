@@ -17,24 +17,44 @@ static bool isTransportError(int code) {
          code == HTTPC_ERROR_TOO_LESS_RAM;
 }
 
+static void breathe() {
+  // Keep FreeRTOS idle/task housekeeping alive during long TLS work.
+  yield();
+  delay(1);
+  yield();
+}
+
 static bool request(const String &method, const String &url, const ProviderConfig &cfg, bool verifyTls,
                     const String &body, JsonDocument &doc, String &error) {
   (void)verifyTls;
   if (!url.startsWith("https://")) { error = "HTTPS required"; return false; }
   const char *label = requestLabel(url);
-  const uint8_t maxAttempts = 3;
+  // Two attempts max: long retries previously starved the board into reboots.
+  const uint8_t maxAttempts = 2;
+
+  // Heap-allocate the TLS client — stack-local WiFiClientSecure was a common
+  // overflow source inside the 8 KB Arduino loop task during multi-provider refresh.
+  WiFiClientSecure *secureClient = new WiFiClientSecure();
+  if (!secureClient) {
+    error = "TLS client alloc failed";
+    return false;
+  }
 
   for (uint8_t attempt = 1; attempt <= maxAttempts; ++attempt) {
-    WiFiClientSecure secureClient;
+    breathe();
     // ESP32 has no maintained CA bundle in this firmware. Strict TLS needs a
     // custom CA in a future release; never downgrade a public request to HTTP.
-    secureClient.setInsecure();
-    secureClient.setHandshakeTimeout(20);
+    secureClient->setInsecure();
+    secureClient->setHandshakeTimeout(12);
+    secureClient->setTimeout(12);
     HTTPClient http;
-    if (!http.begin(secureClient, url)) { error = "connection setup failed"; return false; }
-    // Fail-fast on refused/unreachable hosts so one provider cannot starve the web UI.
-    http.setConnectTimeout(8000);
-    http.setTimeout(15000);
+    if (!http.begin(*secureClient, url)) {
+      error = "connection setup failed";
+      delete secureClient;
+      return false;
+    }
+    http.setConnectTimeout(5000);
+    http.setTimeout(12000);
     http.setReuse(false);
     http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
     const bool claudeOauth = url.indexOf("api.anthropic.com/api/oauth/") >= 0;
@@ -70,28 +90,34 @@ static bool request(const String &method, const String &url, const ProviderConfi
       Serial.printf("[http][%s] Transport error %d (%s), attempt %u/%u heap=%u\n",
                     label, code, detail.c_str(), attempt, maxAttempts, (unsigned)ESP.getFreeHeap());
       http.end();
+      secureClient->stop();
       if (attempt < maxAttempts && isTransportError(code)) {
-        delay(200u * attempt * attempt);
-        yield();
+        delay(150u * attempt);
+        breathe();
         continue;
       }
+      delete secureClient;
       return false;
     }
     if (code < 200 || code >= 300) {
       error = "HTTP " + String(code);
       Serial.printf("[http][%s] HTTP %d\n", label, code);
       http.end();
+      secureClient->stop();
+      delete secureClient;
       return false;
     }
     // Prefer a full buffered body over streaming; chunked Anthropic responses
     // frequently confuse ArduinoJson's stream reader on ESP32.
     String payload = http.getString();
     http.end();
+    secureClient->stop();
     payload.trim();
     if (!payload.length()) {
       error = "empty JSON body";
       Serial.printf("[http][%s] Empty body on HTTP %d, attempt %u/%u\n", label, code, attempt, maxAttempts);
-      if (attempt < maxAttempts) { delay(250); yield(); continue; }
+      if (attempt < maxAttempts) { delay(200); breathe(); continue; }
+      delete secureClient;
       return false;
     }
     doc.clear();
@@ -103,17 +129,17 @@ static bool request(const String &method, const String &url, const ProviderConfi
       Serial.printf("[http][%s] JSON parse %s, bytes=%u, head=%.80s\n",
                     label, parse.c_str(), (unsigned)payload.length(), head.c_str());
       payload = "";
-      if (attempt < maxAttempts) { delay(250); yield(); continue; }
+      if (attempt < maxAttempts) { delay(200); breathe(); continue; }
+      delete secureClient;
       return false;
     }
     payload = "";
     if (attempt > 1) Serial.printf("[http][%s] Retry succeeded\n", label);
-    // Let WiFi/TCP and the local web server breathe between HTTPS round-trips.
-    yield();
-    delay(40);
-    yield();
+    delete secureClient;
+    breathe();
     return true;
   }
+  delete secureClient;
   return false;
 }
 bool getJson(const String &u, const ProviderConfig &c, bool t, JsonDocument &d, String &e) { return request("GET",u,c,t,"",d,e); }

@@ -7,6 +7,7 @@
 #include <Update.h>
 #include <WiFi.h>
 #include <ArduinoJson.h>
+#include <esp_system.h>
 
 static WebServer server(80);
 static AppConfig *cfg;
@@ -295,6 +296,25 @@ void webBegin(AppConfig &c, bool setupMode, UsageRefreshHandler refreshHandler, 
    d["firmware"]="espusage"; d["setup_mode"]=isSetupMode; d["ssid"]=cfg->wifiProvisioned?cfg->wifiSsid:"";
    d["ip"]=isSetupMode?WiFi.softAPIP().toString():WiFi.localIP().toString(); d["rssi"]=isSetupMode?0:WiFi.RSSI();
    d["uptime_ms"]=millis(); d["free_heap"]=ESP.getFreeHeap(); d["psram_free"]=ESP.getFreePsram(); d["hostname"]=cfg->hostname;
+   {
+     esp_reset_reason_t rr = esp_reset_reason();
+     const char *name = "unknown";
+     switch (rr) {
+       case ESP_RST_POWERON: name="power_on"; break;
+       case ESP_RST_EXT: name="external"; break;
+       case ESP_RST_SW: name="software"; break;
+       case ESP_RST_PANIC: name="panic"; break;
+       case ESP_RST_INT_WDT: name="int_wdt"; break;
+       case ESP_RST_TASK_WDT: name="task_wdt"; break;
+       case ESP_RST_WDT: name="wdt"; break;
+       case ESP_RST_DEEPSLEEP: name="deep_sleep"; break;
+       case ESP_RST_BROWNOUT: name="brownout"; break;
+       case ESP_RST_SDIO: name="sdio"; break;
+       default: break;
+     }
+     d["reset_reason"]=name;
+     d["reset_reason_code"]=(int)rr;
+   }
    d["codex_configured"]=cfg->codex.enabled; d["codex_token_stored"]=cfg->codex.token.length()>0; d["codex_endpoint"]=cfg->codex.endpoint;
    d["codex_credits_fallback"]=cfg->codexCreditsFallback;
    d["token_api_configured"]=cfg->tokenApiKey.length()>=12;

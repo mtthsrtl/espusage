@@ -92,8 +92,11 @@ static void updateProviderStatus(uint8_t provider, const UsageSnapshot &snapshot
   if (!providerStatusLabels[provider]) return;
   if (!snapshot.ok) {
     lv_label_set_recolor(providerStatusLabels[provider], false);
-    lv_label_set_text(providerStatusLabels[provider], snapshot.status == "disabled" ? "DISABLED" : "NO DATA");
-    lv_obj_set_style_text_color(providerStatusLabels[provider], C(0x888888), 0);
+    const char *text = "NO DATA";
+    if (snapshot.status == "disabled") text = "DISABLED";
+    else if (snapshot.status == "loading" || snapshot.status.startsWith("loading")) text = "LOADING";
+    lv_label_set_text(providerStatusLabels[provider], text);
+    lv_obj_set_style_text_color(providerStatusLabels[provider], C(text[0] == 'L' ? 0xF2A93B : 0x888888), 0);
     return;
   }
   uint32_t ageSeconds = snapshot.receivedAtMs ? (millis() - snapshot.receivedAtMs) / 1000 : 0;
@@ -1051,8 +1054,9 @@ void displayLoop() {
   }
   if (millis() - lastStatusRefreshMs >= 1000) {
     lastStatusRefreshMs = millis();
+    // Age/status labels only — avoid a forced full-screen refr_now every second
+    // (that power spike lined up with HTTPS refresh and rebooted the board).
     updateProviderStatuses();
-    renderAll();
   }
 }
 void displaySetBrightness(uint8_t value) {

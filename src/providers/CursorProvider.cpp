@@ -231,6 +231,10 @@ static void fetchRecentUsage(const ProviderConfig &request, bool tls, RecentUsag
 }
 
 UsageSnapshot CursorProvider::fetch(const ProviderConfig &cfg, bool tls) {
+  return fetch(cfg, tls, true);
+}
+
+UsageSnapshot CursorProvider::fetch(const ProviderConfig &cfg, bool tls, bool includeRecent30m) {
   UsageSnapshot out; out.provider="Cursor"; out.primary.label="CURSOR MODELS"; out.secondary.label="OTHER MODELS"; out.tertiary.label="ON DEMAND";
   if(!cfg.enabled){out.status="disabled";return out;} if(!cfg.token.length()){out.status="auth token missing";return out;}
   ProviderConfig request=cfg; request.token=""; request.session=cookieFor(cfg.token);
@@ -255,7 +259,8 @@ UsageSnapshot CursorProvider::fetch(const ProviderConfig &cfg, bool tls) {
   out.primary.resetText=reset; out.secondary.resetText=reset; out.tertiary.resetText=reset;
   out.plan=String((const char*)(d["membershipType"]|"")); out.ok=out.primary.usedPercent>=0||out.secondary.usedPercent>=0;
   out.status=out.ok?"online (unofficial)":"usage fields missing";
-  if (url.startsWith("https://cursor.com/api/")) fetchRecentUsage(request, tls, out.recent30m);
+  if (includeRecent30m && url.startsWith("https://cursor.com/api/")) fetchRecentUsage(request, tls, out.recent30m);
+  else if (!includeRecent30m) out.recent30m.status = "skipped this cycle";
   else out.recent30m.status = "custom endpoint";
   return out;
 }
