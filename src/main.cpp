@@ -347,7 +347,19 @@ void loop(){
     webUpdatePrint(status);
   }
   if(WiFi.status()==WL_CONNECTED&&(usageRefreshRequested||lastFetch==0||millis()-lastFetch>(uint32_t)config.refreshMinutes*60000UL)){
-    usageRefreshRequested=false; lastFetch=millis(); Serial.println("[usage] Refreshing Codex, Claude and Cursor");
+    usageRefreshRequested=false; lastFetch=millis();
+    Serial.printf("[usage] Refreshing providers, heap=%u\n",(unsigned)ESP.getFreeHeap());
+    auto pumpLocalServices=[](){
+      for(uint8_t i=0;i<8;++i){displayLoop();webLoop();delay(2);}
+    };
+    // Cursor first while the TLS/socket pool is still cold — it is the most
+    // sensitive to connection-refused after a long Codex/Claude chain.
+    UsageSnapshot freshCursor=cursor.fetch(config.cursor,config.verifyTls);
+    if(freshCursor.ok){freshCursor.receivedAtMs=millis();us=freshCursor;}
+    else if(us.ok){us.status="stale: "+freshCursor.status;}
+    else us=freshCursor;
+    Serial.printf("[usage][cursor] %s\n",us.status.c_str());
+    pumpLocalServices();
     UsageSnapshot freshCodex=codex.fetch(config.codex,config.verifyTls);
     if(freshCodex.ok){freshCodex.receivedAtMs=millis();updateCodexPace(freshCodex);applyCodexCreditsFallback(freshCodex);cs=freshCodex;}
     else if(cs.ok){
@@ -355,6 +367,7 @@ void loop(){
       Serial.printf("[usage][codex] Keeping last valid snapshot after %s\n",freshCodex.status.c_str());
     }else cs=freshCodex;
     Serial.printf("[usage][codex] %s\n",cs.status.c_str());
+    pumpLocalServices();
     UsageSnapshot freshClaude=claude.fetch(config.claude,config.verifyTls);
     if(freshClaude.ok){
       freshClaude.receivedAtMs=millis();
@@ -370,11 +383,7 @@ void loop(){
       Serial.printf("[usage][claude] Keeping last valid snapshot after %s\n",freshClaude.status.c_str());
     }else ls=freshClaude;
     Serial.printf("[usage][claude] %s\n",ls.status.c_str());
-    UsageSnapshot freshCursor=cursor.fetch(config.cursor,config.verifyTls);
-    if(freshCursor.ok){freshCursor.receivedAtMs=millis();us=freshCursor;}
-    else if(us.ok){us.status="stale: "+freshCursor.status;}
-    else us=freshCursor;
-    Serial.printf("[usage][cursor] %s\n",us.status.c_str());
+    pumpLocalServices();
     bool rotateSecondary=config.codex.enabled&&config.codex.token.length()>0&&config.claude.enabled&&config.claude.token.length()>0;
     if(displayGetScreen()==DisplayScreen::Usage) displayUpdate(cs,us,ls,rotateSecondary,config.warningPercent,config.criticalPercent,config.refreshMinutes);
     webUpdateUsage(cs,us,ls);

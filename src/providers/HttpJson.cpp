@@ -10,20 +10,33 @@ static const char *requestLabel(const String &url) {
   return "adapter";
 }
 
+static bool isTransportError(int code) {
+  return code == HTTPC_ERROR_CONNECTION_REFUSED || code == HTTPC_ERROR_CONNECTION_LOST ||
+         code == HTTPC_ERROR_NOT_CONNECTED || code == HTTPC_ERROR_READ_TIMEOUT ||
+         code == HTTPC_ERROR_SEND_PAYLOAD_FAILED || code == HTTPC_ERROR_SEND_HEADER_FAILED ||
+         code == HTTPC_ERROR_TOO_LESS_RAM;
+}
+
 static bool request(const String &method, const String &url, const ProviderConfig &cfg, bool verifyTls,
                     const String &body, JsonDocument &doc, String &error) {
   (void)verifyTls;
   if (!url.startsWith("https://")) { error = "HTTPS required"; return false; }
   const char *label = requestLabel(url);
+  const uint8_t maxAttempts = 3;
 
-  for (uint8_t attempt = 1; attempt <= 2; ++attempt) {
+  for (uint8_t attempt = 1; attempt <= maxAttempts; ++attempt) {
     WiFiClientSecure secureClient;
     // ESP32 has no maintained CA bundle in this firmware. Strict TLS needs a
     // custom CA in a future release; never downgrade a public request to HTTP.
     secureClient.setInsecure();
+    secureClient.setHandshakeTimeout(20);
     HTTPClient http;
     if (!http.begin(secureClient, url)) { error = "connection setup failed"; return false; }
-    http.setConnectTimeout(12000); http.setTimeout(20000); http.setReuse(false);
+    // Fail-fast on refused/unreachable hosts so one provider cannot starve the web UI.
+    http.setConnectTimeout(8000);
+    http.setTimeout(15000);
+    http.setReuse(false);
+    http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
     const bool claudeOauth = url.indexOf("api.anthropic.com/api/oauth/") >= 0;
     http.setUserAgent(claudeOauth ? "claude-code/2.0.0" : "ESPUsage/1.0");
     http.addHeader("Accept", "application/json");
@@ -54,9 +67,14 @@ static bool request(const String &method, const String &url, const ProviderConfi
     if (code < 0) {
       String detail = HTTPClient::errorToString(code);
       error = "transport " + String(code) + ": " + detail;
-      Serial.printf("[http][%s] Transport error %d (%s), attempt %u/2\n", label, code, detail.c_str(), attempt);
+      Serial.printf("[http][%s] Transport error %d (%s), attempt %u/%u heap=%u\n",
+                    label, code, detail.c_str(), attempt, maxAttempts, (unsigned)ESP.getFreeHeap());
       http.end();
-      if (attempt == 1) { delay(350); continue; }
+      if (attempt < maxAttempts && isTransportError(code)) {
+        delay(200u * attempt * attempt);
+        yield();
+        continue;
+      }
       return false;
     }
     if (code < 200 || code >= 300) {
@@ -72,8 +90,8 @@ static bool request(const String &method, const String &url, const ProviderConfi
     payload.trim();
     if (!payload.length()) {
       error = "empty JSON body";
-      Serial.printf("[http][%s] Empty body on HTTP %d, attempt %u/2\n", label, code, attempt);
-      if (attempt == 1) { delay(350); continue; }
+      Serial.printf("[http][%s] Empty body on HTTP %d, attempt %u/%u\n", label, code, attempt, maxAttempts);
+      if (attempt < maxAttempts) { delay(250); yield(); continue; }
       return false;
     }
     doc.clear();
@@ -84,9 +102,11 @@ static bool request(const String &method, const String &url, const ProviderConfi
       head.replace('\n', ' ');
       Serial.printf("[http][%s] JSON parse %s, bytes=%u, head=%.80s\n",
                     label, parse.c_str(), (unsigned)payload.length(), head.c_str());
-      if (attempt == 1) { delay(350); continue; }
+      payload = "";
+      if (attempt < maxAttempts) { delay(250); yield(); continue; }
       return false;
     }
+    payload = "";
     if (attempt > 1) Serial.printf("[http][%s] Retry succeeded\n", label);
     return true;
   }
@@ -94,4 +114,3 @@ static bool request(const String &method, const String &url, const ProviderConfi
 }
 bool getJson(const String &u, const ProviderConfig &c, bool t, JsonDocument &d, String &e) { return request("GET",u,c,t,"",d,e); }
 bool postJson(const String &u, const ProviderConfig &c, bool t, const String &b, JsonDocument &d, String &e) { return request("POST",u,c,t,b,d,e); }
-

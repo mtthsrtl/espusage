@@ -109,6 +109,10 @@ static String planFromProfile(JsonDocument &profile) {
   return "";
 }
 
+static String cachedClaudePlan;
+static uint32_t cachedClaudePlanAtMs = 0;
+static constexpr uint32_t CLAUDE_PLAN_CACHE_MS = 6UL * 60UL * 60UL * 1000UL;
+
 static UsageSnapshot fetchOAuthUsage(const ProviderConfig &cfg, bool tls, const String &accessToken) {
   UsageSnapshot out;
   out.provider = "Claude";
@@ -126,13 +130,24 @@ static UsageSnapshot fetchOAuthUsage(const ProviderConfig &cfg, bool tls, const 
     return out;
   }
   fillFromUsageDocument(d, out, "online (Claude OAuth)");
+  if (cachedClaudePlan.length() && cachedClaudePlanAtMs &&
+      (millis() - cachedClaudePlanAtMs) < CLAUDE_PLAN_CACHE_MS) {
+    out.plan = cachedClaudePlan;
+    return out;
+  }
   JsonDocument profile;
   String profileError;
   if (getJson("https://api.anthropic.com/api/oauth/profile", request, tls, profile, profileError)) {
     String plan = planFromProfile(profile);
-    if (plan.length()) out.plan = plan;
+    if (plan.length()) {
+      out.plan = plan;
+      cachedClaudePlan = plan;
+      cachedClaudePlanAtMs = millis();
+    }
     String orgId = String((const char *)(profile["organization"]["uuid"] | ""));
     if (orgId.length() && !cfg.accountId.length()) out.updated = orgId;
+  } else if (cachedClaudePlan.length()) {
+    out.plan = cachedClaudePlan;
   } else if (!out.plan.length() || out.plan == "Claude") {
     // Keep usage bars even if profile fails; leave badge empty rather than "CLAUDE".
     out.plan = "";

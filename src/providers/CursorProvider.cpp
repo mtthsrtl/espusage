@@ -97,12 +97,18 @@ static float legacyCostCents(JsonVariantConst value) {
 
 static void fetchRecentUsage(const ProviderConfig &request, bool tls, RecentUsage30m &recent) {
   const uint16_t pageSize = 50;
-  const uint8_t maxPages = 10;
+  // Cap pages hard: each TLS round-trip can starve the local web UI on ESP32.
+  const uint8_t maxPages = 3;
   const uint64_t fiveMinutesMs = 5ULL * 60ULL * 1000ULL;
   time_t nowSeconds = time(nullptr);
   if (nowSeconds < 1700000000) {
     recent.status = "waiting for clock";
     Serial.println("[usage][cursor][30m] Waiting for NTP clock");
+    return;
+  }
+  if (ESP.getFreeHeap() < 90000) {
+    recent.status = "skipped: low heap";
+    Serial.printf("[usage][cursor][30m] Skipping events, heap=%u\n", (unsigned)ESP.getFreeHeap());
     return;
   }
 
@@ -114,6 +120,16 @@ static void fetchRecentUsage(const ProviderConfig &request, bool tls, RecentUsag
   bool anyCost = false, finished = false, firstPageOk = false;
 
   for (uint8_t page = 1; page <= maxPages; ++page) {
+    if (page > 1) {
+      delay(80);
+      yield();
+      if (ESP.getFreeHeap() < 70000) {
+        recent.partial = firstPageOk;
+        recent.status = firstPageOk ? "partial: low heap" : "skipped: low heap";
+        Serial.printf("[usage][cursor][30m] Abort page %u, heap=%u\n", page, (unsigned)ESP.getFreeHeap());
+        break;
+      }
+    }
     String body;
     body.reserve(128);
     body = "{\"teamId\":0,\"startDate\":\"" + String(startMs) + "\",\"endDate\":\"" + String(endMs) +
