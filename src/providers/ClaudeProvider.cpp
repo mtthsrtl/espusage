@@ -113,6 +113,15 @@ static String cachedClaudePlan;
 static uint32_t cachedClaudePlanAtMs = 0;
 static constexpr uint32_t CLAUDE_PLAN_CACHE_MS = 6UL * 60UL * 60UL * 1000UL;
 
+void ClaudeProvider::seedPlanCache(const String &plan) {
+  String value = plan;
+  value.trim();
+  if (!value.length() || cachedClaudePlan.length()) return;
+  cachedClaudePlan = value;
+  // NVS seed: skip profile on the first refresh after boot; RAM TTL still applies.
+  cachedClaudePlanAtMs = millis() ? millis() : 1;
+}
+
 static UsageSnapshot fetchOAuthUsage(const ProviderConfig &cfg, bool tls, const String &accessToken) {
   UsageSnapshot out;
   out.provider = "Claude";

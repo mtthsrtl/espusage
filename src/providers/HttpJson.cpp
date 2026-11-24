@@ -108,6 +108,10 @@ static bool request(const String &method, const String &url, const ProviderConfi
     }
     payload = "";
     if (attempt > 1) Serial.printf("[http][%s] Retry succeeded\n", label);
+    // Let WiFi/TCP and the local web server breathe between HTTPS round-trips.
+    yield();
+    delay(40);
+    yield();
     return true;
   }
   return false;

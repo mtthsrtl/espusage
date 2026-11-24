@@ -26,6 +26,7 @@ bool loadConfig(AppConfig &c) {
   c.claude.token = prefs.getString("claude_tok", "");
   c.claude.session = prefs.getString("claude_sess", "");
   c.claude.accountId = prefs.getString("claude_acct", "");
+  c.claudePlan = prefs.getString("claude_plan", "");
   c.brightness = prefs.getUChar("bright", 85);
   c.refreshMinutes = prefs.getUShort("refresh", 5);
   c.warningPercent = prefs.getUChar("warn_pct", 70);
@@ -100,6 +101,7 @@ bool saveConfig(const AppConfig &c) {
   prefs.putBool("claude_on", c.claude.enabled); prefs.putString("claude_url", c.claude.endpoint);
   prefs.putString("claude_tok", c.claude.token); prefs.putString("claude_sess", c.claude.session);
   prefs.putString("claude_acct", c.claude.accountId);
+  prefs.putString("claude_plan", c.claudePlan);
   prefs.putUChar("bright", c.brightness); prefs.putUShort("refresh", c.refreshMinutes);
   prefs.putUChar("warn_pct", c.warningPercent); prefs.putUChar("crit_pct", c.criticalPercent);
   prefs.putUInt("over_color", c.overpaceColor & 0xFFFFFF); prefs.putUInt("warn_color", c.warningColor & 0xFFFFFF);

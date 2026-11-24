@@ -41,6 +41,7 @@ struct AppConfig {
   ProviderConfig codex;
   ProviderConfig cursor;
   ProviderConfig claude;
+  String claudePlan;  // cached PRO/MAX badge across reboots
   BambuConfig bambu;
   MqttConfig mqtt;
   String tokenApiKey;

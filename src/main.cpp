@@ -331,7 +331,7 @@ static HaDeviceMeta buildDeviceMeta() {
   return meta;
 }
 
-void setup(){Serial.begin(115200);delay(300);Serial.println("\n[boot] ESP Usage starting");ensureCleanPeripheralBoot();loadConfig(config);Serial.printf("[config][nvs] Cursor: enabled=%s, token=%s\n",config.cursor.enabled?"yes":"no",config.cursor.token.length()?"stored":"missing");Serial.printf("[config][nvs] Codex: enabled=%s, access_token=%s, account_id=%s, mode=%s\n",config.codex.enabled?"yes":"no",config.codex.token.length()?"stored":"missing",config.codex.accountId.length()?"stored":"missing",config.codex.endpoint.length()?"adapter":"direct");Serial.printf("[config][nvs] Claude: enabled=%s, session=%s, org=%s\n",config.claude.enabled?"yes":"no",config.claude.token.length()?"stored":"missing",config.claude.accountId.length()?"stored":"missing");Serial.printf("[config][nvs] Bambu: enabled=%s, mode=%s, serial=%s\n",config.bambu.enabled?"yes":"no",config.bambu.mode==1?"cloud":"local",config.bambu.serial.c_str());Serial.printf("[config][nvs] MQTT: enabled=%s, host=%s, port=%u\n",config.mqtt.enabled?"yes":"no",config.mqtt.host.c_str(),config.mqtt.port);Serial.printf("[config][nvs] Display off time: %s, %02u:%02u-%02u:%02u Europe/Berlin\n",config.displayOffEnabled?"enabled":"disabled",config.displayOffFromMinutes/60,config.displayOffFromMinutes%60,config.displayOffUntilMinutes/60,config.displayOffUntilMinutes%60);bool connected=connectWifi();displayBegin(config);displaySetBrightness(config.brightness);displaySetNetwork(startupNetworkText,startupNetworkConnected);bambu.configure(config.bambu);bambu.setActive(false);haMqttBegin(config);webBegin(config,!connected,requestUsageRefresh,handleViewChange,handleBambuSessionApplied);Serial.println("[boot] Web portal ready");}
+void setup(){Serial.begin(115200);delay(300);Serial.println("\n[boot] ESP Usage starting");ensureCleanPeripheralBoot();loadConfig(config);if(config.claudePlan.length())ClaudeProvider::seedPlanCache(config.claudePlan);Serial.printf("[config][nvs] Cursor: enabled=%s, token=%s\n",config.cursor.enabled?"yes":"no",config.cursor.token.length()?"stored":"missing");Serial.printf("[config][nvs] Codex: enabled=%s, access_token=%s, account_id=%s, mode=%s\n",config.codex.enabled?"yes":"no",config.codex.token.length()?"stored":"missing",config.codex.accountId.length()?"stored":"missing",config.codex.endpoint.length()?"adapter":"direct");Serial.printf("[config][nvs] Claude: enabled=%s, session=%s, org=%s\n",config.claude.enabled?"yes":"no",config.claude.token.length()?"stored":"missing",config.claude.accountId.length()?"stored":"missing");Serial.printf("[config][nvs] Bambu: enabled=%s, mode=%s, serial=%s\n",config.bambu.enabled?"yes":"no",config.bambu.mode==1?"cloud":"local",config.bambu.serial.c_str());Serial.printf("[config][nvs] MQTT: enabled=%s, host=%s, port=%u\n",config.mqtt.enabled?"yes":"no",config.mqtt.host.c_str(),config.mqtt.port);Serial.printf("[config][nvs] Display off time: %s, %02u:%02u-%02u:%02u Europe/Berlin\n",config.displayOffEnabled?"enabled":"disabled",config.displayOffFromMinutes/60,config.displayOffFromMinutes%60,config.displayOffUntilMinutes/60,config.displayOffUntilMinutes%60);bool connected=connectWifi();displayBegin(config);displaySetBrightness(config.brightness);displaySetNetwork(startupNetworkText,startupNetworkConnected);bambu.configure(config.bambu);bambu.setActive(false);haMqttBegin(config);webBegin(config,!connected,requestUsageRefresh,handleViewChange,handleBambuSessionApplied);Serial.println("[boot] Web portal ready");}
 void loop(){
   displayLoop(); webLoop(); updateDisplayPower(); updateAutomaticReboot();
   haMqttLoop();
@@ -371,10 +371,18 @@ void loop(){
     UsageSnapshot freshClaude=claude.fetch(config.claude,config.verifyTls);
     if(freshClaude.ok){
       freshClaude.receivedAtMs=millis();
+      bool claudeCfgDirty=false;
       if(freshClaude.updated.length() && config.claude.accountId != freshClaude.updated){
         config.claude.accountId=freshClaude.updated;
-        if(saveConfig(config)) Serial.printf("[usage][claude] Cached organization %s\n",config.claude.accountId.c_str());
+        claudeCfgDirty=true;
+        Serial.printf("[usage][claude] Cached organization %s\n",config.claude.accountId.c_str());
       }
+      if(freshClaude.plan.length() && config.claudePlan != freshClaude.plan){
+        config.claudePlan=freshClaude.plan;
+        claudeCfgDirty=true;
+        Serial.printf("[usage][claude] Cached plan badge %s\n",config.claudePlan.c_str());
+      }
+      if(claudeCfgDirty && saveConfig(config)) Serial.println("[usage][claude] NVS updated");
       freshClaude.updated="";
       updateClaudePace(freshClaude);
       ls=freshClaude;

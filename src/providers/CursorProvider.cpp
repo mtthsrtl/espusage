@@ -98,7 +98,8 @@ static float legacyCostCents(JsonVariantConst value) {
 static void fetchRecentUsage(const ProviderConfig &request, bool tls, RecentUsage30m &recent) {
   const uint16_t pageSize = 50;
   // Cap pages hard: each TLS round-trip can starve the local web UI on ESP32.
-  const uint8_t maxPages = 3;
+  const uint32_t heap = ESP.getFreeHeap();
+  const uint8_t maxPages = heap < 120000 ? 2 : 3;
   const uint64_t fiveMinutesMs = 5ULL * 60ULL * 1000ULL;
   time_t nowSeconds = time(nullptr);
   if (nowSeconds < 1700000000) {
@@ -106,9 +107,9 @@ static void fetchRecentUsage(const ProviderConfig &request, bool tls, RecentUsag
     Serial.println("[usage][cursor][30m] Waiting for NTP clock");
     return;
   }
-  if (ESP.getFreeHeap() < 90000) {
+  if (heap < 90000) {
     recent.status = "skipped: low heap";
-    Serial.printf("[usage][cursor][30m] Skipping events, heap=%u\n", (unsigned)ESP.getFreeHeap());
+    Serial.printf("[usage][cursor][30m] Skipping events, heap=%u\n", (unsigned)heap);
     return;
   }
 
@@ -139,6 +140,7 @@ static void fetchRecentUsage(const ProviderConfig &request, bool tls, RecentUsag
       recent.partial = firstPageOk;
       recent.status = firstPageOk ? "partial: " + error : error;
       Serial.printf("[usage][cursor][30m] Page %u failed: %s\n", page, error.c_str());
+      // Connection refused means the socket pool is wedged — stop paging immediately.
       break;
     }
     firstPageOk = true;
