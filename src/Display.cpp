@@ -114,6 +114,17 @@ static const UsageSnapshot &activeSecondarySnapshot() {
 
 static String formatPlanBadge(String plan);
 
+static void layoutPlanBadgeAfterTitle(uint8_t provider) {
+  if (!providerTitleLabels[provider] || !providerPlanLabels[provider]) return;
+  if (lv_obj_has_flag(providerPlanLabels[provider], LV_OBJ_FLAG_HIDDEN)) return;
+  lv_obj_update_layout(providerTitleLabels[provider]);
+  lv_coord_t titleX = lv_obj_get_x(providerTitleLabels[provider]);
+  lv_coord_t titleW = lv_obj_get_width(providerTitleLabels[provider]);
+  lv_coord_t badgeY = lv_obj_get_y(providerPlanLabels[provider]);
+  // Keep a clear gap between provider name and plan badge (CLAUDE is wider than CODEX).
+  lv_obj_set_pos(providerPlanLabels[provider], titleX + titleW + 14, badgeY);
+}
+
 static void applySecondaryPanelChrome(const UsageSnapshot &snapshot) {
   bool claude = rotateCodexClaude ? showClaudePanel : (snapshot.provider == "Claude");
   if (providerTitleLabels[1]) lv_label_set_text(providerTitleLabels[1], claude ? "CLAUDE" : "CODEX");
@@ -131,6 +142,7 @@ static void applySecondaryPanelChrome(const UsageSnapshot &snapshot) {
     lv_label_set_text(providerPlanLabels[1], plan.c_str());
     if (plan.length()) lv_obj_clear_flag(providerPlanLabels[1], LV_OBJ_FLAG_HIDDEN);
     else lv_obj_add_flag(providerPlanLabels[1], LV_OBJ_FLAG_HIDDEN);
+    layoutPlanBadgeAfterTitle(1);
   }
 }
 
@@ -1274,6 +1286,7 @@ void displayUpdate(const UsageSnapshot &codex, const UsageSnapshot &cursor, cons
   if (providerPlanLabels[0]) {
     lv_label_set_text(providerPlanLabels[0], cursorPlan.c_str());
     if (cursorPlan.length()) lv_obj_clear_flag(providerPlanLabels[0], LV_OBJ_FLAG_HIDDEN); else lv_obj_add_flag(providerPlanLabels[0], LV_OBJ_FLAG_HIDDEN);
+    layoutPlanBadgeAfterTitle(0);
   }
   renderAll();
   Serial.printf("[display] view=%s, Cursor %.1f / %.1f / %.1f, secondary=%s weekly %.1f, rotate=%u\n",
