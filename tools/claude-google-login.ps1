@@ -8,10 +8,10 @@ param(
 $ErrorActionPreference = "Stop"
 $DeviceUrl = $DeviceUrl.TrimEnd("/")
 $ClientId = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
-# Hosted code callback + token endpoint used by Claude Code / documented working flow.
-$TokenUrl = "https://console.anthropic.com/v1/oauth/token"
+# console.anthropic.com/v1/oauth/token returns 404 not_found; use platform.claude.com.
+$TokenUrl = "https://platform.claude.com/v1/oauth/token"
 $AuthUrl = "https://claude.ai/oauth/authorize"
-$ManualRedirect = "https://console.anthropic.com/oauth/code/callback"
+$ManualRedirect = "https://platform.claude.com/oauth/code/callback"
 # Keep scopes minimal but include profile (required by /api/oauth/usage).
 $AuthorizeScope = "user:profile user:inference user:sessions:claude_code user:mcp_servers"
 
@@ -63,18 +63,34 @@ function Get-AuthorizeUrl([string]$redirectUri, $pkce) {
 }
 
 function Exchange-AuthCode([string]$code, [string]$redirectUri, $pkce, [string]$state) {
-    $bodyObj = [ordered]@{
+    # platform.claude.com expects form-urlencoded for the manual/code callback flow.
+    $form = @{
         grant_type    = "authorization_code"
         code          = $code
-        state         = $state
-        client_id     = $ClientId
         redirect_uri  = $redirectUri
+        client_id     = $ClientId
         code_verifier = $pkce.Verifier
+        state         = $state
     }
-    $body = $bodyObj | ConvertTo-Json -Compress
-    return Invoke-RestMethod -Method Post -Uri $TokenUrl -ContentType "application/json; charset=utf-8" -Body $body -Headers @{
-        Accept       = "application/json"
-        "User-Agent" = "claude-code/2.0.0"
+    try {
+        return Invoke-RestMethod -Method Post -Uri $TokenUrl -Body $form -ContentType "application/x-www-form-urlencoded" -Headers @{
+            Accept       = "application/json, text/plain, */*"
+            "User-Agent" = "claude-code/2.0.0"
+        }
+    } catch {
+        # Fallback: Claude Code local flow historically posted JSON with axios headers.
+        $json = (@{
+            grant_type    = "authorization_code"
+            code          = $code
+            redirect_uri  = $redirectUri
+            client_id     = $ClientId
+            code_verifier = $pkce.Verifier
+            state         = $state
+        } | ConvertTo-Json -Compress)
+        return Invoke-RestMethod -Method Post -Uri $TokenUrl -Body $json -ContentType "application/json" -Headers @{
+            Accept       = "application/json, text/plain, */*"
+            "User-Agent" = "axios/1.15.2"
+        }
     }
 }
 
@@ -90,14 +106,13 @@ function Try-RefreshAccessToken([string]$path) {
         return $access
     }
     Write-Host "Refreshing Claude Code OAuth token..."
-    $body = (@{
-        grant_type    = "refresh_token"
-        refresh_token = [string]$cred.claudeAiOauth.refreshToken
-        client_id     = $ClientId
-    } | ConvertTo-Json -Compress)
     try {
-        $tok = Invoke-RestMethod -Method Post -Uri $TokenUrl -ContentType "application/json; charset=utf-8" -Body $body -Headers @{
-            Accept       = "application/json"
+        $tok = Invoke-RestMethod -Method Post -Uri $TokenUrl -ContentType "application/x-www-form-urlencoded" -Body @{
+            grant_type    = "refresh_token"
+            refresh_token = [string]$cred.claudeAiOauth.refreshToken
+            client_id     = $ClientId
+        } -Headers @{
+            Accept       = "application/json, text/plain, */*"
             "User-Agent" = "claude-code/2.0.0"
         }
     } catch {
@@ -135,8 +150,8 @@ function Start-InteractiveClaudeLogin([string]$path) {
     $url = Get-AuthorizeUrl $redirect $pkce
     Write-Host ""
     Write-Host "Opening browser for Claude/Google login..."
-    Write-Host "After login you land on console.anthropic.com with an authorization code."
-    Write-Host "Paste the FULL value (CODE#STATE)."
+    Write-Host "After login you land on platform.claude.com with an authorization code."
+    Write-Host "Paste the FULL value (CODE#STATE). Codes are single-use - get a fresh one each run."
     Write-Host ""
     Open-BrowserUrl $url
 
