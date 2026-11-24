@@ -27,6 +27,9 @@ static bool request(const String &method, const String &url, const ProviderConfi
     const bool claudeOauth = url.indexOf("api.anthropic.com/api/oauth/") >= 0;
     http.setUserAgent(claudeOauth ? "claude-code/2.0.0" : "ESPUsage/1.0");
     http.addHeader("Accept", "application/json");
+    // Avoid gzip/br bodies — ESP HTTPClient + ArduinoJson stream parse often
+    // yields DeserializationError::InvalidInput on compressed Anthropic replies.
+    http.addHeader("Accept-Encoding", "identity");
     http.addHeader("Connection", "close");
     if (url.indexOf("api2.cursor.sh/aiserver.v1.DashboardService/") >= 0)
       http.addHeader("Connect-Protocol-Version", "1");
@@ -38,7 +41,10 @@ static bool request(const String &method, const String &url, const ProviderConfi
       http.addHeader("Origin", "https://claude.ai");
       http.addHeader("Referer", "https://claude.ai/settings/usage");
     }
-    if (claudeOauth) http.addHeader("anthropic-beta", "oauth-2025-04-20");
+    if (claudeOauth) {
+      http.addHeader("anthropic-beta", "oauth-2025-04-20");
+      http.addHeader("anthropic-version", "2023-06-01");
+    }
     if (cfg.token.length()) http.addHeader("Authorization", "Bearer " + cfg.token);
     if (cfg.accountId.length() && url.indexOf("chatgpt.com") >= 0) http.addHeader("ChatGPT-Account-Id", cfg.accountId);
     if (cfg.session.length()) http.addHeader("Cookie", cfg.session);
@@ -59,10 +65,28 @@ static bool request(const String &method, const String &url, const ProviderConfi
       http.end();
       return false;
     }
-    doc.clear();
-    DeserializationError parse = deserializeJson(doc, http.getStream());
+    // Prefer a full buffered body over streaming; chunked Anthropic responses
+    // frequently confuse ArduinoJson's stream reader on ESP32.
+    String payload = http.getString();
     http.end();
-    if (parse) { error = String("invalid JSON: ") + parse.c_str(); return false; }
+    payload.trim();
+    if (!payload.length()) {
+      error = "empty JSON body";
+      Serial.printf("[http][%s] Empty body on HTTP %d, attempt %u/2\n", label, code, attempt);
+      if (attempt == 1) { delay(350); continue; }
+      return false;
+    }
+    doc.clear();
+    DeserializationError parse = deserializeJson(doc, payload);
+    if (parse) {
+      error = String("invalid JSON: ") + parse.c_str();
+      String head = payload.substring(0, payload.length() < 80 ? payload.length() : 80);
+      head.replace('\n', ' ');
+      Serial.printf("[http][%s] JSON parse %s, bytes=%u, head=%.80s\n",
+                    label, parse.c_str(), (unsigned)payload.length(), head.c_str());
+      if (attempt == 1) { delay(350); continue; }
+      return false;
+    }
     if (attempt > 1) Serial.printf("[http][%s] Retry succeeded\n", label);
     return true;
   }
