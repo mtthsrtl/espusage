@@ -16,6 +16,7 @@ static ViewChangeHandler requestViewChange;
 static BambuSessionHandler applyBambuSession;
 static UsageSnapshot latestCodex;
 static UsageSnapshot latestCursor;
+static UsageSnapshot latestClaude;
 static BambuStatus latestPrint;
 static bool hasUsageSnapshot = false;
 static bool hasPrintSnapshot = false;
@@ -158,11 +159,19 @@ static const char PAGE[] PROGMEM=R"HTML(
 <label for=manual>SSID (or enter a hidden network)</label><input id=manual maxlength=32 autocomplete=off>
 <label for=wifi_pw>WiFi password</label><input id=wifi_pw type=password maxlength=64 autocomplete=new-password>
 <button type=button onclick=saveWifi()>Save WiFi &amp; restart</button> <button class=danger type=button onclick=resetWifi()>Delete WiFi configuration</button><p class=msg id=wifiMsg></p></section>
-<div class=advanced><section><h2>Live usage</h2><p>Current provider values and activity for the last 30 minutes. This view contains no access tokens or account identifiers.</p><div class=grid><div class=usage-card><h3>Cursor</h3><div class=usage-main id=cursorMain>Waiting...</div><div class=mini id=cursorChart></div><div class=usage-detail id=cursorDetail></div></div><div class="usage-card codex"><h3>Codex</h3><div class=usage-main id=codexMain>Waiting...</div><div class=mini id=codexChart></div><div class=usage-detail id=codexDetail></div></div></div></section>
+<div class=advanced><section><h2>Live usage</h2><p>Current provider values and activity for the last 30 minutes. This view contains no access tokens or account identifiers. When Codex and Claude are both configured, the physical display rotates between them every 5 seconds.</p><div class=grid><div class=usage-card><h3>Cursor</h3><div class=usage-main id=cursorMain>Waiting...</div><div class=mini id=cursorChart></div><div class=usage-detail id=cursorDetail></div></div><div class="usage-card codex"><h3>Codex</h3><div class=usage-main id=codexMain>Waiting...</div><div class=mini id=codexChart></div><div class=usage-detail id=codexDetail></div></div><div class="usage-card codex"><h3>Claude</h3><div class=usage-main id=claudeMain>Waiting...</div><div class=mini id=claudeChart></div><div class=usage-detail id=claudeDetail></div></div></div></section>
   <form method=post action=/api/config><div class=settings-grid><div><section><h2>Codex</h2><p class=warn>Codex limit usage uses the current Codex account endpoint. The local access token still expires and must be synced again when authentication fails.</p><label><input type=checkbox name=codex_on> Enabled</label><label class=switch><input type=checkbox name=codex_credits_fallback><span>Show credit balance when a limit is exhausted</span></label><p>An exhausted 5-hour or weekly row switches to credits and automatically returns after its limit resets.</p><label>Codex access_token (empty keeps current)</label><input type=password name=codex_tok autocomplete=new-password><p>PowerShell: copy the local Codex access token:</p><pre class=command>(Get-Content "$env:USERPROFILE\.codex\auth.json" -Raw | ConvertFrom-Json).tokens.access_token | Set-Clipboard</pre><label>ChatGPT account_id, optional (empty keeps current)</label><input type=password name=codex_acct autocomplete=off><p>PowerShell: copy the matching account ID:</p><pre class=command>(Get-Content "$env:USERPROFILE\.codex\auth.json" -Raw | ConvertFrom-Json).tokens.account_id | Set-Clipboard</pre><label>Token webhook API key (empty keeps current)</label><input type=password name=token_api_key autocomplete=new-password minlength=12><p>Required by <code>POST /api/tokens</code>. Use at least 12 characters and keep it private.</p><label>Custom limit adapter URL (empty uses Codex app token)</label><input name=codex_url></section>
+  <section><h2>Claude</h2><p class=warn>Unofficial claude.ai usage API. Google login must finish in a real browser; then push the sessionKey here (bookmarklet or PowerShell helper).</p><label><input type=checkbox name=claude_on> Enabled</label>
+  <p><button class=secondary type=button onclick=claudeGoogleLogin()>Login with Google</button>
+  <button class=secondary type=button onclick=copyClaudeBookmarklet()>Copy bookmarklet</button></p>
+  <p id=claudeLoginMsg class=msg></p>
+  <label>sessionKey (empty keeps current)</label><input type=password name=claude_tok autocomplete=new-password>
+  <label>Organization UUID, optional (empty keeps current / auto-detect)</label><input name=claude_acct autocomplete=off>
+  <p>PC helper: <code>.\tools\claude-google-login.ps1 -DeviceUrl http://192.168.178.123</code></p>
+  <p>When Codex and Claude are both enabled with credentials, the display panel rotates every 5 seconds.</p></section>
   <section><h2>Cursor personal</h2><p class=warn>Unofficial read-only dashboard API; may change.</p><label><input type=checkbox name=cursor_on> Enabled</label><label>Usage URL</label><input name=cursor_url value="https://cursor.com/api/usage-summary"><label>Cursor access token (empty keeps current)</label><input type=password name=cursor_tok autocomplete=new-password><p>PowerShell (uses Python included on this computer):</p><pre class=command>python -c 'import os,sqlite3; db=os.path.join(os.environ["APPDATA"],r"Cursor\User\globalStorage\state.vscdb"); print(sqlite3.connect(db).execute("SELECT value FROM ItemTable WHERE key=''cursorAuth/accessToken''").fetchone()[0])' | Set-Clipboard</pre><p>Treat copied tokens as account credentials and use them only on a trusted network.</p><button>Save provider settings &amp; restart</button></section>
   <section><h2>Bambu Lab A1</h2><p class=warn>Cloudflare often blocks direct ESP login. Prefer PC login script <code>tools/bambu-cloud-login.ps1</code>, which pushes the cloud session to this device. MQTT runs only on the print screen.</p><label><input type=checkbox name=bambu_on> Enable print screen</label><label>Connection mode</label><select name=bambu_mode><option value=cloud>Bambu Cloud</option><option value=local>Local MQTT (LAN Only)</option></select><label>Cloud region</label><select name=bambu_region><option value=global>Global</option><option value=cn>China</option></select><label>Bambu account email</label><input name=bambu_acct type=email autocomplete=username placeholder="you@example.com"><label>Bambu password (empty keeps current; ESP login may be blocked)</label><input type=password name=bambu_pw autocomplete=current-password><label>Email verification code (only if Bambu asks)</label><input name=bambu_vcode autocomplete=one-time-code placeholder="6-digit code"><label>Printer serial (optional)</label><input name=bambu_serial autocomplete=off><label>Local printer IP</label><input name=bambu_host autocomplete=off placeholder="only for local mode"><label>Local access code (empty keeps current)</label><input type=password name=bambu_code autocomplete=new-password><p>PC helper: <code>.\tools\bambu-cloud-login.ps1</code> · Screen switch: <code>/api/view?screen=usage|print|toggle</code></p></section>
-  <section><h2>Home Assistant MQTT</h2><p>Publish flat usage sensors to your existing broker. HTTP mirrors: <code>/api/ha/sensors</code>, <code>/api/ha/cursor</code>, <code>/api/ha/codex</code>, <code>/api/ha/device</code>.</p><label><input type=checkbox name=mqtt_on> Enable MQTT publish</label><label class=switch><input type=checkbox name=mqtt_disc checked><span>Home Assistant MQTT Discovery</span></label><label>Broker host</label><input name=mqtt_host autocomplete=off placeholder="192.168.1.10"><div class=row><div><label>Port</label><input name=mqtt_port type=number min=1 max=65535 value=1883></div><div><label>Topic prefix</label><input name=mqtt_prefix value=espusage></div></div><label>Username (optional)</label><input name=mqtt_user autocomplete=username><label>Password (empty keeps current)</label><input name=mqtt_pw type=password autocomplete=new-password></section>
+  <section><h2>Home Assistant MQTT</h2><p>Publish flat usage sensors to your existing broker. HTTP mirrors: <code>/api/ha/sensors</code>, <code>/api/ha/cursor</code>, <code>/api/ha/codex</code>, <code>/api/ha/claude</code>, <code>/api/ha/device</code>.</p><label><input type=checkbox name=mqtt_on> Enable MQTT publish</label><label class=switch><input type=checkbox name=mqtt_disc checked><span>Home Assistant MQTT Discovery</span></label><label>Broker host</label><input name=mqtt_host autocomplete=off placeholder="192.168.1.10"><div class=row><div><label>Port</label><input name=mqtt_port type=number min=1 max=65535 value=1883></div><div><label>Topic prefix</label><input name=mqtt_prefix value=espusage></div></div><label>Username (optional)</label><input name=mqtt_user autocomplete=username><label>Password (empty keeps current)</label><input name=mqtt_pw type=password autocomplete=new-password></section>
   <section><h2>Build</h2><p>Version <strong id=buildVersion>0.9.8.3</strong></p><p>Beta · build date and time use CEST.</p></section></div>
   <section><h2>Background</h2><p>Choose the base color behind the dashboard panels.</p><label>Background color</label><input name=background_color type=color value="#000000"></section>
   <section><h2>Display</h2><p>Choose the dashboard layout and the information shown on the physical display.</p><label>Dashboard design</label><select name=display_style><option value=panels>Panels - framed sections</option><option value=open>Flat - open sections and larger</option><option value=telemetry>Telemetry - layered signal cards</option><option value=matrix>Matrix - split provider columns</option><option value=vertical>Vertical - split limit columns</option></select><label>Displayed values</label><select name=display_mode><option value=used>Used</option><option value=remaining>Remaining</option></select><label for=usageRows>Visible usage rows</label><select id=usageRows name=usage_rows multiple size=7><option value=cursor_models>Cursor Models</option><option value=cursor_other>Other Models</option><option value=cursor_ondemand>On Demand</option><option value=cursor_30m>Cursor 30 minutes</option><option value=codex_5h>Codex 5-hour limit</option><option value=codex_weekly>Codex weekly limit</option><option value=codex_30m>Codex 30 minutes</option></select><p>Hold Ctrl/Cmd to select individual rows. The pace indicator marks elapsed time in the reset period.</p><h2>Pace indicator</h2><div class=row><div><label>Indicator color</label><input name=pace_indicator_color type=color value="#FFFFFF"></div><div><label>Glow color</label><input name=pace_indicator_glow_color type=color value="#FFFFFF"></div></div><label class=switch><input type=checkbox name=pace_indicator_glow><span>Glow enabled</span></label><h2>Display off schedule</h2><label class=switch><input type=checkbox name=display_off_enabled><span>Display off enabled</span></label><div class=row><div><label>Display off from</label><input name=display_off_from type=time value="22:00"></div><div><label>Display off until</label><input name=display_off_until type=time value="07:00"></div></div><p>Uses Europe/Berlin local time. Touch wakes the display for one minute.</p><h2>Automatic reboot</h2><label class=switch><input type=checkbox name=automatic_reboot_enabled><span>Automatic reboot enabled</span></label><label>Reboot every hours</label><input name=automatic_reboot_hours type=number min=1 max=168 value=2><p>The interval starts again after every reboot.</p><h2>Device and refresh</h2><label>Hostname</label><input name=host value=espusage><div class=row><div><label>Brightness %</label><input name=bright type=number min=1 max=100 value=85></div><div><label>Refresh minutes</label><input name=refresh type=number min=1 max=1440 value=5></div></div><h2>Status thresholds</h2><p>Critical overrides Warning, which overrides Overpace.</p><div class=row><div><label>Overpace color</label><input name=overpace_color type=color value="#DDF542"></div><div><label>Warning color</label><input name=warning_color type=color value="#F0A020"></div></div><div class=row><div><label>Warning from used %</label><input name=warning type=number min=1 max=98 value=70></div><div><label>Critical from used %</label><input name=critical type=number min=2 max=100 value=90></div></div><a class="button secondary" href=/api/screenshot>Download live screenshot</a> <button>Save all settings &amp; restart</button></section></div></form>
@@ -180,10 +189,14 @@ function usageValue(w){if(w.monetary){let c=w.currency||'$',u=Number(w.used_amou
 function chart(id,buckets,field){let root=q(id),max=Math.max(0,...buckets.map(b=>b.valid?Number(b[field]||0):0));root.replaceChildren();buckets.forEach(b=>{let bar=document.createElement('span'),v=Number(b[field]||0);bar.style.height=(b.valid&&max?Math.max(2,Math.round(34*v/max)):2)+'px';bar.style.opacity=b.valid?'1':'.25';bar.title=b.valid?String(v):'No sample';root.append(bar)})}
 function renderCursor(c){let r=c.recent_30m||{},tokens=Number(r.total_tokens||0),partial=r.tokenized_calls<r.calls||r.partial;q('#cursorMain').textContent=!r.available?'NO DATA':r.calls?(r.token_data?`${fmt(tokens)}${partial?'+':''} TOK | ${r.calls} CALLS`:`${r.calls} CALLS | TOK N/A`):'0 CALLS';q('#cursorDetail').textContent=`Models ${c.primary.used_percent<0?'--':c.primary.used_percent.toFixed(1)}% used | Other ${c.secondary.used_percent<0?'--':c.secondary.used_percent.toFixed(1)}% | On Demand ${usageValue(c.tertiary)}\nInput ${fmt(r.input_tokens)} | Output ${fmt(r.output_tokens)}\nCache read ${fmt(r.cache_read_tokens)} | Cache write ${fmt(r.cache_write_tokens)}\nTop model ${r.top_model||'n/a'} | Type ${r.top_kind||'n/a'} | Max Mode ${r.max_mode_calls||0}${r.cost_cents>=0?' | Cost $'+(r.cost_cents/100).toFixed(4):''}\n${partial?'Partial token coverage: some calls did not report tokens.':(r.status||c.status)}`;q('#cursorDetail').classList.toggle('partial',partial);chart('#cursorChart',r.buckets||[],r.token_data&&tokens>0?'tokens':'calls')}
 function renderCodex(c){let h=c.primary||{},w=c.secondary||{},r=c.recent_30m||{},valid=(r.buckets||[]).filter(b=>b.valid).length;q('#codexMain').textContent=!r.available?'NO DATA':r.ready?`+${Number(r.delta_pp||0).toFixed(2)} PP`:`COLLECTING 1/2`;q('#codexDetail').textContent=`5-hour ${h.used_percent<0?'--':h.used_percent.toFixed(0)}% used | Weekly ${w.used_percent<0?'--':w.used_percent.toFixed(0)}% used\n5-hour: ${h.reset||'Reset unavailable'}\nWeekly: ${w.reset||'Reset unavailable'}\nMeasurements ${r.samples||0} | Filled 5-minute buckets ${valid}/6\n${r.status||c.status}`;chart('#codexChart',r.buckets||[],'delta_pp')}
-async function loadUsage(){try{let r=await fetch('/api/usage'),u=await r.json();if(u.ready){renderCursor(u.cursor);renderCodex(u.codex)}}catch(e){q('#cursorMain').textContent=q('#codexMain').textContent='Unavailable'}}
+function renderClaude(c){let h=c.primary||{},w=c.secondary||{},r=c.recent_30m||{},valid=(r.buckets||[]).filter(b=>b.valid).length;q('#claudeMain').textContent=!r.available?'NO DATA':r.ready?`+${Number(r.delta_pp||0).toFixed(2)} PP`:`COLLECTING 1/2`;q('#claudeDetail').textContent=`5-hour ${h.used_percent<0?'--':h.used_percent.toFixed(0)}% used | Weekly ${w.used_percent<0?'--':w.used_percent.toFixed(0)}% used\n5-hour: ${h.reset||'Reset unavailable'}\nWeekly: ${w.reset||'Reset unavailable'}\nMeasurements ${r.samples||0} | Filled 5-minute buckets ${valid}/6\n${r.status||c.status}`;chart('#claudeChart',r.buckets||[],'delta_pp')}
+function claudeGoogleLogin(){window.open('https://claude.ai/login','claude_login');q('#claudeLoginMsg').textContent='Finish Google login on claude.ai, then run the bookmarklet or PowerShell helper to push the session.';}
+function claudeBookmarklet(){const device=location.origin;return `javascript:(async()=>{try{const c=document.cookie||'';const sk=(c.match(/(?:^|;\\s*)sessionKey=([^;]+)/)||[])[1];const org=(c.match(/(?:^|;\\s*)lastActiveOrg=([^;]+)/)||[])[1]||'';if(!sk){alert('sessionKey cookie not found. Stay on claude.ai after Google login.');return;}const body=new URLSearchParams({session_key:decodeURIComponent(sk),org_id:decodeURIComponent(org)});const r=await fetch('${device}/api/claude/session',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body});const j=await r.json();alert(j.ok?'Claude session pushed to ESP Usage':'Push failed: '+(j.error||r.status));}catch(e){alert('Push failed: '+e);}})();`}
+async function copyClaudeBookmarklet(){try{await navigator.clipboard.writeText(claudeBookmarklet());q('#claudeLoginMsg').textContent='Bookmarklet copied. On claude.ai after Google login, paste it into the address bar (or save as bookmark) and run it.';}catch(e){q('#claudeLoginMsg').textContent='Could not copy. Select and copy from the console command below.';console.log(claudeBookmarklet());}}
+async function loadUsage(){try{let r=await fetch('/api/usage'),u=await r.json();if(u.ready){renderCursor(u.cursor);renderCodex(u.codex);renderClaude(u.claude||{})}}catch(e){q('#cursorMain').textContent=q('#codexMain').textContent=q('#claudeMain').textContent='Unavailable'}}
 const hx=n=>'0x'+Number(n||0).toString(16).toUpperCase().padStart(2,'0');
 async function loadTouch(){try{let r=await fetch('/api/touch',{cache:'no-store'}),t=await r.json(),working=t.point_frames>0||t.tap_events>0;q('#touchMain').textContent=t.status;q('#touchMain').className='usage-main '+(working?'ok':'bad');q('#touchDetail').textContent=`Controller: ${t.controller}${t.address?' @ '+hx(t.address):''}\nI2C: SDA ${t.sda}, SCL ${t.scl}, 50 kHz | devices: ${t.bus_devices}\nDisplay: RGB 480 x 480 | pixel clock: 10 MHz\nRaw size: ${t.raw_width} x ${t.raw_height}\nLVGL callbacks: ${t.callback_calls} | fallback reads: ${t.fallback_reads} | GT911 polls: ${t.polls}\nState reads: ${t.state_reads} | errors: ${t.state_read_errors} | last state: ${hx(t.last_state)} | touches: ${t.last_touch_count}\nReady frames: ${t.ready_frames} | point frames: ${t.point_frames} | ACK errors: ${t.ack_errors}\nLast point raw: ${t.raw_x}, ${t.raw_y} | display: ${t.display_x}, ${t.display_y} | pressed: ${t.pressed}\nGestures down/up/tap/toggle: ${t.down_events}/${t.up_events}/${t.tap_events}/${t.toggle_events}\nLast event: ${t.last_event} at ${t.last_event_ms} ms\nLast error: ${t.last_error}\nPossible GSL3680 at 0x40: ${t.possible_gsl3680?'yes':'no'} | view: ${t.remaining_view?'remaining':'used'}`;}catch(e){q('#touchMain').textContent='Touch diagnostics unavailable';q('#touchMain').className='usage-main bad'}}
-  fetch('/api/status').then(r=>r.json()).then(s=>{if(s.setup_mode){document.body.classList.add('setup');q('#intro').textContent='Setup mode: choose your WiFi network to continue.'}else if(s.ssid){q('#manual').value=s.ssid}q('[name=codex_on]').checked=!!s.codex_configured;q('[name=codex_credits_fallback]').checked=!!s.codex_credits_fallback;q('[name=cursor_on]').checked=!!s.cursor_configured;q('[name=codex_url]').value=s.codex_endpoint||'';q('[name=cursor_url]').value=s.cursor_endpoint||'https://cursor.com/api/usage-summary';q('[name=bambu_on]').checked=!!s.bambu_configured;q('[name=bambu_mode]').value=s.bambu_mode||'cloud';q('[name=bambu_region]').value=s.bambu_region||'global';q('[name=bambu_serial]').value=s.bambu_serial||'';q('[name=bambu_host]').value=s.bambu_host||'';q('[name=bambu_acct]').value=s.bambu_account||'';q('[name=mqtt_on]').checked=!!s.mqtt_enabled;q('[name=mqtt_disc]').checked=s.mqtt_discovery!==false;q('[name=mqtt_host]').value=s.mqtt_host||'';q('[name=mqtt_port]').value=s.mqtt_port||1883;q('[name=mqtt_prefix]').value=s.mqtt_prefix||'espusage';q('[name=mqtt_user]').value=s.mqtt_user||'';q('[name=display_style]').value=s.display_style||'panels';q('[name=display_mode]').value=s.display_mode||'used';let rows={cursor_models:s.show_cursor_models,cursor_other:s.show_cursor_other,cursor_ondemand:s.show_cursor_ondemand,cursor_30m:s.show_cursor_30m,codex_weekly:s.show_codex_weekly,codex_30m:s.show_codex_30m};[...q('#usageRows').options].forEach(o=>o.selected=!!rows[o.value]);q('[name=pace_indicator_color]').value=s.pace_indicator_color||'#FFFFFF';q('[name=pace_indicator_glow_color]').value=s.pace_indicator_glow_color||s.pace_indicator_color||'#FFFFFF';q('[name=pace_indicator_glow]').checked=!!s.pace_indicator_glow;q('[name=display_off_enabled]').checked=!!s.display_off_enabled;q('[name=display_off_from]').value=s.display_off_from||'22:00';q('[name=display_off_until]').value=s.display_off_until||'07:00';q('[name=automatic_reboot_enabled]').checked=!!s.automatic_reboot_enabled;q('[name=automatic_reboot_hours]').value=s.automatic_reboot_hours||2;q('[name=host]').value=s.hostname||'espusage';q('[name=bright]').value=s.brightness||85;q('[name=refresh]').value=s.refresh_minutes||5;q('[name=overpace_color]').value=s.overpace_color||'#DDF542';q('[name=warning_color]').value=s.warning_color||'#F0A020';q('[name=warning]').value=s.warning_percent||70;q('[name=critical]').value=s.critical_percent||90;if(s.setup_mode||page==='wifi')scan();if(page==='debug'){loadUsage();loadTouch();setInterval(loadUsage,15000);setInterval(loadTouch,2000)}}).catch(()=>{q('#intro').textContent='Device status unavailable. Reload the page.'});
+  fetch('/api/status').then(r=>r.json()).then(s=>{if(s.setup_mode){document.body.classList.add('setup');q('#intro').textContent='Setup mode: choose your WiFi network to continue.'}else if(s.ssid){q('#manual').value=s.ssid}q('[name=codex_on]').checked=!!s.codex_configured;q('[name=codex_credits_fallback]').checked=!!s.codex_credits_fallback;q('[name=cursor_on]').checked=!!s.cursor_configured;q('[name=claude_on]').checked=!!s.claude_configured;q('[name=codex_url]').value=s.codex_endpoint||'';q('[name=cursor_url]').value=s.cursor_endpoint||'https://cursor.com/api/usage-summary';q('[name=bambu_on]').checked=!!s.bambu_configured;q('[name=bambu_mode]').value=s.bambu_mode||'cloud';q('[name=bambu_region]').value=s.bambu_region||'global';q('[name=bambu_serial]').value=s.bambu_serial||'';q('[name=bambu_host]').value=s.bambu_host||'';q('[name=bambu_acct]').value=s.bambu_account||'';q('[name=mqtt_on]').checked=!!s.mqtt_enabled;q('[name=mqtt_disc]').checked=s.mqtt_discovery!==false;q('[name=mqtt_host]').value=s.mqtt_host||'';q('[name=mqtt_port]').value=s.mqtt_port||1883;q('[name=mqtt_prefix]').value=s.mqtt_prefix||'espusage';q('[name=mqtt_user]').value=s.mqtt_user||'';q('[name=display_style]').value=s.display_style||'panels';q('[name=display_mode]').value=s.display_mode||'used';let rows={cursor_models:s.show_cursor_models,cursor_other:s.show_cursor_other,cursor_ondemand:s.show_cursor_ondemand,cursor_30m:s.show_cursor_30m,codex_weekly:s.show_codex_weekly,codex_30m:s.show_codex_30m};[...q('#usageRows').options].forEach(o=>o.selected=!!rows[o.value]);q('[name=pace_indicator_color]').value=s.pace_indicator_color||'#FFFFFF';q('[name=pace_indicator_glow_color]').value=s.pace_indicator_glow_color||s.pace_indicator_color||'#FFFFFF';q('[name=pace_indicator_glow]').checked=!!s.pace_indicator_glow;q('[name=display_off_enabled]').checked=!!s.display_off_enabled;q('[name=display_off_from]').value=s.display_off_from||'22:00';q('[name=display_off_until]').value=s.display_off_until||'07:00';q('[name=automatic_reboot_enabled]').checked=!!s.automatic_reboot_enabled;q('[name=automatic_reboot_hours]').value=s.automatic_reboot_hours||2;q('[name=host]').value=s.hostname||'espusage';q('[name=bright]').value=s.brightness||85;q('[name=refresh]').value=s.refresh_minutes||5;q('[name=overpace_color]').value=s.overpace_color||'#DDF542';q('[name=warning_color]').value=s.warning_color||'#F0A020';q('[name=warning]').value=s.warning_percent||70;q('[name=critical]').value=s.critical_percent||90;if(s.setup_mode||page==='wifi')scan();if(page==='debug'){loadUsage();loadTouch();setInterval(loadUsage,15000);setInterval(loadTouch,2000)}}).catch(()=>{q('#intro').textContent='Device status unavailable. Reload the page.'});
 fetch('/api/status').then(r=>r.json()).then(s=>{q('[name=background_color]').value=s.background_color||'#000000';let five=q('#usageRows option[value=codex_5h]');if(five)five.selected=!!s.show_codex_5h;if(q('#buildVersion'))q('#buildVersion').textContent=s.version||'0.9.8.3'});
 </script></body></html>)HTML";
 
@@ -253,6 +266,7 @@ static HaDeviceMeta currentDeviceMeta() {
   uint32_t newest = 0;
   if (latestCursor.receivedAtMs) newest = latestCursor.receivedAtMs;
   if (latestCodex.receivedAtMs && latestCodex.receivedAtMs > newest) newest = latestCodex.receivedAtMs;
+  if (latestClaude.receivedAtMs && latestClaude.receivedAtMs > newest) newest = latestClaude.receivedAtMs;
   meta.usageAgeMs = newest ? millis() - newest : 0;
   meta.version = BUILD_VERSION;
   return meta;
@@ -287,6 +301,7 @@ void webBegin(AppConfig &c, bool setupMode, UsageRefreshHandler refreshHandler, 
    d["codex_credits_fallback"]=cfg->codexCreditsFallback;
    d["token_api_configured"]=cfg->tokenApiKey.length()>=12;
    d["cursor_configured"]=cfg->cursor.enabled; d["cursor_token_stored"]=cfg->cursor.token.length()>0; d["cursor_endpoint"]=cfg->cursor.endpoint;
+   d["claude_configured"]=cfg->claude.enabled; d["claude_token_stored"]=cfg->claude.token.length()>0; d["claude_org_stored"]=cfg->claude.accountId.length()>0;
    d["bambu_configured"]=cfg->bambu.enabled; d["bambu_mode"]=cfg->bambu.mode==1?"cloud":"local";
    d["bambu_region"]=cfg->bambu.region==1?"cn":"global"; d["bambu_host"]=cfg->bambu.host; d["bambu_serial"]=cfg->bambu.serial;
    d["bambu_account"]=cfg->bambu.account; d["bambu_password_stored"]=cfg->bambu.password.length()>0;
@@ -323,28 +338,35 @@ void webBegin(AppConfig &c, bool setupMode, UsageRefreshHandler refreshHandler, 
    JsonDocument d; d["ready"]=hasUsageSnapshot;
    addSnapshotJson(d["cursor"].to<JsonObject>(), latestCursor);
    addSnapshotJson(d["codex"].to<JsonObject>(), latestCodex);
+   addSnapshotJson(d["claude"].to<JsonObject>(), latestClaude);
    String s; serializeJson(d,s); server.send(200,"application/json",s);
  });
  server.on("/api/ha/sensors",HTTP_GET,[]{
    JsonDocument d;
-   haBuildSensors(d, latestCursor, latestCodex, currentDeviceMeta());
+   haBuildSensors(d, latestCursor, latestCodex, latestClaude, currentDeviceMeta());
    sendHaJson(d);
  });
  server.on("/api/ha/cursor",HTTP_GET,[]{
    JsonDocument all, d;
-   haBuildSensors(all, latestCursor, latestCodex, currentDeviceMeta());
+   haBuildSensors(all, latestCursor, latestCodex, latestClaude, currentDeviceMeta());
    haFilterPrefix(all, d, "cursor_");
    sendHaJson(d);
  });
  server.on("/api/ha/codex",HTTP_GET,[]{
    JsonDocument all, d;
-   haBuildSensors(all, latestCursor, latestCodex, currentDeviceMeta());
+   haBuildSensors(all, latestCursor, latestCodex, latestClaude, currentDeviceMeta());
    haFilterPrefix(all, d, "codex_");
+   sendHaJson(d);
+ });
+ server.on("/api/ha/claude",HTTP_GET,[]{
+   JsonDocument all, d;
+   haBuildSensors(all, latestCursor, latestCodex, latestClaude, currentDeviceMeta());
+   haFilterPrefix(all, d, "claude_");
    sendHaJson(d);
  });
  server.on("/api/ha/device",HTTP_GET,[]{
    JsonDocument all, d;
-   haBuildSensors(all, latestCursor, latestCodex, currentDeviceMeta());
+   haBuildSensors(all, latestCursor, latestCodex, latestClaude, currentDeviceMeta());
    haFilterDevice(all, d);
    sendHaJson(d);
  });
@@ -403,6 +425,31 @@ void webBegin(AppConfig &c, bool setupMode, UsageRefreshHandler refreshHandler, 
    if(applyBambuSession)applyBambuSession();
    JsonDocument d;d["ok"]=true;d["bambu_mode"]="cloud";d["bambu_user"]=cfg->bambu.userId;d["bambu_serial"]=cfg->bambu.serial;
    d["token_stored"]=cfg->bambu.cloudToken.length()>0;d["applied"]=applyBambuSession!=nullptr;
+   String s;serializeJson(d,s);server.sendHeader("Cache-Control","no-store");server.send(200,"application/json",s);
+ });
+ server.on("/api/claude/session",HTTP_OPTIONS,[]{
+   server.sendHeader("Access-Control-Allow-Origin","*");
+   server.sendHeader("Access-Control-Allow-Methods","POST, OPTIONS");
+   server.sendHeader("Access-Control-Allow-Headers","Content-Type");
+   server.send(204);
+ });
+ server.on("/api/claude/session",HTTP_POST,[]{
+   server.sendHeader("Access-Control-Allow-Origin","*");
+   if(!cfg){server.send(500,"application/json","{\"ok\":false,\"error\":\"config unavailable\"}");return;}
+   String sessionKey=server.arg("session_key"); if(!sessionKey.length())sessionKey=server.arg("sessionKey");
+   sessionKey.trim();
+   if(sessionKey.startsWith("sessionKey="))sessionKey.remove(0,11);
+   int cut=sessionKey.indexOf(';'); if(cut>=0)sessionKey=sessionKey.substring(0,cut); sessionKey.trim();
+   String orgId=server.arg("org_id"); if(!orgId.length())orgId=server.arg("orgId"); orgId.trim();
+   if(!sessionKey.length()){server.send(400,"application/json","{\"ok\":false,\"error\":\"session_key required\"}");return;}
+   if(sessionKey.length()>3500||orgId.length()>128){server.send(413,"application/json","{\"ok\":false,\"error\":\"credential value too long\"}");return;}
+   cfg->claude.enabled=true;
+   cfg->claude.token=sessionKey;
+   if(orgId.length())cfg->claude.accountId=orgId;
+   if(!saveConfig(*cfg)){server.send(500,"application/json","{\"ok\":false,\"error\":\"could not save claude session\"}");return;}
+   if(requestUsageRefresh)requestUsageRefresh();
+   JsonDocument d;d["ok"]=true;d["claude_enabled"]=true;d["session_stored"]=true;d["org_stored"]=cfg->claude.accountId.length()>0;
+   d["refresh_queued"]=requestUsageRefresh!=nullptr;
    String s;serializeJson(d,s);server.sendHeader("Cache-Control","no-store");server.send(200,"application/json",s);
  });
  server.on("/api/touch",HTTP_GET,[]{
@@ -478,6 +525,9 @@ void webBegin(AppConfig &c, bool setupMode, UsageRefreshHandler refreshHandler, 
    String codexToken=server.arg("codex_tok"); codexToken.trim(); if(codexToken.startsWith("Bearer "))codexToken.remove(0,7); if(codexToken.length())cfg->codex.token=codexToken;
    String accountId=server.arg("codex_acct"); accountId.trim(); if(accountId.length())cfg->codex.accountId=accountId;
    cfg->cursor.enabled=server.hasArg("cursor_on"); cfg->cursor.endpoint=server.arg("cursor_url"); String cursorToken=server.arg("cursor_tok"); cursorToken.trim(); if(cursorToken.length())cfg->cursor.token=cursorToken;
+   cfg->claude.enabled=server.hasArg("claude_on");
+   String claudeTok=server.arg("claude_tok"); claudeTok.trim(); if(claudeTok.startsWith("sessionKey="))claudeTok.remove(0,11); if(claudeTok.length())cfg->claude.token=claudeTok;
+   String claudeOrg=server.arg("claude_acct"); claudeOrg.trim(); if(claudeOrg.length())cfg->claude.accountId=claudeOrg;
    cfg->bambu.enabled=server.hasArg("bambu_on");
    cfg->bambu.mode=server.arg("bambu_mode")=="local"?0:1;
    cfg->bambu.region=server.arg("bambu_region")=="cn"?1:0;
@@ -514,6 +564,7 @@ void webBegin(AppConfig &c, bool setupMode, UsageRefreshHandler refreshHandler, 
    cfg->paceIndicatorGlow=server.hasArg("pace_indicator_glow");
    Serial.printf("[config][nvs] Saving Cursor: enabled=%s, token=%s\n",cfg->cursor.enabled?"yes":"no",cfg->cursor.token.length()?"stored":"missing");
    Serial.printf("[config][nvs] Saving Codex: enabled=%s, access_token=%s, account_id=%s\n",cfg->codex.enabled?"yes":"no",cfg->codex.token.length()?"stored":"missing",cfg->codex.accountId.length()?"stored":"missing");
+   Serial.printf("[config][nvs] Saving Claude: enabled=%s, session=%s, org=%s\n",cfg->claude.enabled?"yes":"no",cfg->claude.token.length()?"stored":"missing",cfg->claude.accountId.length()?"stored":"missing");
    Serial.printf("[config][nvs] Saving Bambu: enabled=%s, mode=%s, serial=%s\n",cfg->bambu.enabled?"yes":"no",cfg->bambu.mode==1?"cloud":"local",cfg->bambu.serial.c_str());
    Serial.printf("[config][nvs] Saving MQTT: enabled=%s, host=%s, port=%u, discovery=%s\n",cfg->mqtt.enabled?"yes":"no",cfg->mqtt.host.c_str(),cfg->mqtt.port,cfg->mqtt.discovery?"yes":"no");
    Serial.printf("[config][nvs] Display style=%s, mode=%s, rows: Cursor=%u/%u/%u/%u, Codex=%u/%u/%u\n",cfg->displayStyle==4?"vertical":cfg->displayStyle==3?"matrix":cfg->displayStyle==2?"telemetry":cfg->displayStyle==1?"open":"panels",cfg->displayAvailable?"remaining":"used",cfg->showCursorModels,cfg->showCursorOther,cfg->showCursorOnDemand,cfg->showCursorThirtyMinute,cfg->showCodexFiveHour,cfg->showCodexWeekly,cfg->showCodexThirtyMinute);
@@ -531,9 +582,10 @@ void webBegin(AppConfig &c, bool setupMode, UsageRefreshHandler refreshHandler, 
  server.begin();
 }
 void webLoop(){server.handleClient();}
-void webUpdateUsage(const UsageSnapshot &codex, const UsageSnapshot &cursor) {
+void webUpdateUsage(const UsageSnapshot &codex, const UsageSnapshot &cursor, const UsageSnapshot &claude) {
   latestCodex = codex;
   latestCursor = cursor;
+  latestClaude = claude;
   hasUsageSnapshot = true;
 }
 void webUpdatePrint(const BambuStatus &status) {

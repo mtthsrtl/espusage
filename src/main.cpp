@@ -12,9 +12,10 @@
 #include "HaMqtt.h"
 #include "providers/CodexProvider.h"
 #include "providers/CursorProvider.h"
+#include "providers/ClaudeProvider.h"
 #include "providers/BambuProvider.h"
-static AppConfig config; static CodexProvider codex; static CursorProvider cursor; static BambuClient bambu;
-static UsageSnapshot cs,us; static uint32_t lastFetch=0, lastPrintUiMs=0; static bool usageRefreshRequested=false;
+static AppConfig config; static CodexProvider codex; static CursorProvider cursor; static ClaudeProvider claude; static BambuClient bambu;
+static UsageSnapshot cs,us,ls; static uint32_t lastFetch=0, lastPrintUiMs=0; static bool usageRefreshRequested=false;
 static volatile uint8_t lastDisconnectReason=0;
 static String startupNetworkText="STARTING"; static bool startupNetworkConnected=false;
 static constexpr const char *DISPLAY_TIMEZONE = "CET-1CEST,M3.5.0/2,M10.5.0/3";
@@ -23,10 +24,10 @@ static uint32_t displayWakeUntilMs = 0;
 static uint32_t nextAutomaticRebootMs = 0;
 
 struct CodexPaceBucket { uint32_t slot = 0; float delta = 0; bool valid = false; };
-static CodexPaceBucket codexPace[6];
-static bool codexLastValid = false;
-static float codexLastWeekly = -1;
-static uint16_t codexSampleCount = 0;
+static CodexPaceBucket codexPace[6], claudePace[6];
+static bool codexLastValid = false, claudeLastValid = false;
+static float codexLastWeekly = -1, claudeLastWeekly = -1;
+static uint16_t codexSampleCount = 0, claudeSampleCount = 0;
 
 static void ensureCleanPeripheralBoot() {
   esp_reset_reason_t reason = esp_reset_reason();
@@ -107,6 +108,9 @@ static void updateAutomaticReboot() {
 
 static void clearCodexPace() {
   for (CodexPaceBucket &bucket : codexPace) bucket = CodexPaceBucket();
+}
+static void clearClaudePace() {
+  for (CodexPaceBucket &bucket : claudePace) bucket = CodexPaceBucket();
 }
 
 static bool isDisplayOffWindow(uint16_t minuteOfDay) {
@@ -206,6 +210,54 @@ static void updateCodexPace(UsageSnapshot &snapshot) {
                 recent.deltaPercent, recent.samples, validCount, recent.status.c_str());
 }
 
+static void updateClaudePace(UsageSnapshot &snapshot) {
+  RecentUsage30m &recent = snapshot.recent30m;
+  time_t now = time(nullptr);
+  if (now < 1700000000) { recent.status = "waiting for clock"; return; }
+  float weekly = snapshot.secondary.usedPercent;
+  if (weekly < 0) { recent.status = "weekly data missing"; return; }
+
+  uint32_t slot = (uint32_t)now / 300U;
+  CodexPaceBucket &current = claudePace[slot % 6];
+  if (!current.valid || current.slot != slot) { current.slot = slot; current.delta = 0; current.valid = true; }
+  bool resetDetected = claudeLastValid && weekly + 0.05f < claudeLastWeekly;
+  if (resetDetected) {
+    clearClaudePace();
+    claudeSampleCount = 1;
+    CodexPaceBucket &resetBucket = claudePace[slot % 6];
+    resetBucket.slot = slot; resetBucket.valid = true;
+    Serial.printf("[usage][claude][30m] Weekly reset detected: %.1f -> %.1f\n", claudeLastWeekly, weekly);
+  } else {
+    if (claudeSampleCount < UINT16_MAX) claudeSampleCount++;
+    if (claudeLastValid) {
+      float delta = weekly - claudeLastWeekly;
+      if (delta > 0) claudePace[slot % 6].delta += delta;
+    }
+  }
+  claudeLastWeekly = weekly; claudeLastValid = true;
+
+  recent.available = true;
+  uint8_t validCount = 0;
+  uint32_t firstSlot = slot >= 5 ? slot - 5 : 0;
+  for (uint8_t i = 0; i < 6; ++i) {
+    uint32_t wanted = firstSlot + i;
+    CodexPaceBucket &source = claudePace[wanted % 6];
+    if (source.valid && source.slot == wanted) {
+      recent.buckets[i].valid = true;
+      recent.buckets[i].deltaPercent = source.delta;
+      recent.deltaPercent += source.delta;
+      validCount++;
+    }
+  }
+  recent.samples = claudeSampleCount;
+  recent.ready = claudeSampleCount >= 2;
+  recent.status = resetDetected ? "reset detected; collecting baseline" : recent.ready
+                    ? validCount == 6 ? "online" : "online; " + String(validCount) + "/6 buckets"
+                    : "collecting baseline";
+  Serial.printf("[usage][claude][30m] delta=%.2f pp, measurements=%u, buckets=%u/6, status=%s\n",
+                recent.deltaPercent, recent.samples, validCount, recent.status.c_str());
+}
+
 static void applyCodexCreditsFallback(UsageSnapshot &snapshot) {
   if (!config.codexCreditsFallback || snapshot.credits < 0) return;
   auto replaceExhaustedLimit = [&](UsageWindow &window) {
@@ -261,7 +313,7 @@ static bool connectWifi(){
 }
 static HaDeviceMeta buildDeviceMeta() {
   HaDeviceMeta meta;
-  meta.ready = cs.ok || us.ok;
+  meta.ready = cs.ok || us.ok || ls.ok;
   meta.ip = WiFi.localIP().toString();
   meta.hostname = config.hostname;
   meta.uptimeMs = millis();
@@ -273,12 +325,13 @@ static HaDeviceMeta buildDeviceMeta() {
   uint32_t newest = 0;
   if (us.receivedAtMs) newest = us.receivedAtMs;
   if (cs.receivedAtMs && cs.receivedAtMs > newest) newest = cs.receivedAtMs;
+  if (ls.receivedAtMs && ls.receivedAtMs > newest) newest = ls.receivedAtMs;
   meta.usageAgeMs = newest ? millis() - newest : 0;
   meta.version = BUILD_VERSION;
   return meta;
 }
 
-void setup(){Serial.begin(115200);delay(300);Serial.println("\n[boot] ESP Usage starting");ensureCleanPeripheralBoot();loadConfig(config);Serial.printf("[config][nvs] Cursor: enabled=%s, token=%s\n",config.cursor.enabled?"yes":"no",config.cursor.token.length()?"stored":"missing");Serial.printf("[config][nvs] Codex: enabled=%s, access_token=%s, account_id=%s, mode=%s\n",config.codex.enabled?"yes":"no",config.codex.token.length()?"stored":"missing",config.codex.accountId.length()?"stored":"missing",config.codex.endpoint.length()?"adapter":"direct");Serial.printf("[config][nvs] Bambu: enabled=%s, mode=%s, serial=%s\n",config.bambu.enabled?"yes":"no",config.bambu.mode==1?"cloud":"local",config.bambu.serial.c_str());Serial.printf("[config][nvs] MQTT: enabled=%s, host=%s, port=%u\n",config.mqtt.enabled?"yes":"no",config.mqtt.host.c_str(),config.mqtt.port);Serial.printf("[config][nvs] Display off time: %s, %02u:%02u-%02u:%02u Europe/Berlin\n",config.displayOffEnabled?"enabled":"disabled",config.displayOffFromMinutes/60,config.displayOffFromMinutes%60,config.displayOffUntilMinutes/60,config.displayOffUntilMinutes%60);bool connected=connectWifi();displayBegin(config);displaySetBrightness(config.brightness);displaySetNetwork(startupNetworkText,startupNetworkConnected);bambu.configure(config.bambu);bambu.setActive(false);haMqttBegin(config);webBegin(config,!connected,requestUsageRefresh,handleViewChange,handleBambuSessionApplied);Serial.println("[boot] Web portal ready");}
+void setup(){Serial.begin(115200);delay(300);Serial.println("\n[boot] ESP Usage starting");ensureCleanPeripheralBoot();loadConfig(config);Serial.printf("[config][nvs] Cursor: enabled=%s, token=%s\n",config.cursor.enabled?"yes":"no",config.cursor.token.length()?"stored":"missing");Serial.printf("[config][nvs] Codex: enabled=%s, access_token=%s, account_id=%s, mode=%s\n",config.codex.enabled?"yes":"no",config.codex.token.length()?"stored":"missing",config.codex.accountId.length()?"stored":"missing",config.codex.endpoint.length()?"adapter":"direct");Serial.printf("[config][nvs] Claude: enabled=%s, session=%s, org=%s\n",config.claude.enabled?"yes":"no",config.claude.token.length()?"stored":"missing",config.claude.accountId.length()?"stored":"missing");Serial.printf("[config][nvs] Bambu: enabled=%s, mode=%s, serial=%s\n",config.bambu.enabled?"yes":"no",config.bambu.mode==1?"cloud":"local",config.bambu.serial.c_str());Serial.printf("[config][nvs] MQTT: enabled=%s, host=%s, port=%u\n",config.mqtt.enabled?"yes":"no",config.mqtt.host.c_str(),config.mqtt.port);Serial.printf("[config][nvs] Display off time: %s, %02u:%02u-%02u:%02u Europe/Berlin\n",config.displayOffEnabled?"enabled":"disabled",config.displayOffFromMinutes/60,config.displayOffFromMinutes%60,config.displayOffUntilMinutes/60,config.displayOffUntilMinutes%60);bool connected=connectWifi();displayBegin(config);displaySetBrightness(config.brightness);displaySetNetwork(startupNetworkText,startupNetworkConnected);bambu.configure(config.bambu);bambu.setActive(false);haMqttBegin(config);webBegin(config,!connected,requestUsageRefresh,handleViewChange,handleBambuSessionApplied);Serial.println("[boot] Web portal ready");}
 void loop(){
   displayLoop(); webLoop(); updateDisplayPower(); updateAutomaticReboot();
   haMqttLoop();
@@ -294,7 +347,7 @@ void loop(){
     webUpdatePrint(status);
   }
   if(WiFi.status()==WL_CONNECTED&&(usageRefreshRequested||lastFetch==0||millis()-lastFetch>(uint32_t)config.refreshMinutes*60000UL)){
-    usageRefreshRequested=false; lastFetch=millis(); Serial.println("[usage] Refreshing Codex and Cursor");
+    usageRefreshRequested=false; lastFetch=millis(); Serial.println("[usage] Refreshing Codex, Claude and Cursor");
     UsageSnapshot freshCodex=codex.fetch(config.codex,config.verifyTls);
     if(freshCodex.ok){freshCodex.receivedAtMs=millis();updateCodexPace(freshCodex);applyCodexCreditsFallback(freshCodex);cs=freshCodex;}
     else if(cs.ok){
@@ -302,14 +355,30 @@ void loop(){
       Serial.printf("[usage][codex] Keeping last valid snapshot after %s\n",freshCodex.status.c_str());
     }else cs=freshCodex;
     Serial.printf("[usage][codex] %s\n",cs.status.c_str());
+    UsageSnapshot freshClaude=claude.fetch(config.claude,config.verifyTls);
+    if(freshClaude.ok){
+      freshClaude.receivedAtMs=millis();
+      if(freshClaude.updated.length() && config.claude.accountId != freshClaude.updated){
+        config.claude.accountId=freshClaude.updated;
+        if(saveConfig(config)) Serial.printf("[usage][claude] Cached organization %s\n",config.claude.accountId.c_str());
+      }
+      freshClaude.updated="";
+      updateClaudePace(freshClaude);
+      ls=freshClaude;
+    }else if(ls.ok){
+      ls.status="stale: "+freshClaude.status;
+      Serial.printf("[usage][claude] Keeping last valid snapshot after %s\n",freshClaude.status.c_str());
+    }else ls=freshClaude;
+    Serial.printf("[usage][claude] %s\n",ls.status.c_str());
     UsageSnapshot freshCursor=cursor.fetch(config.cursor,config.verifyTls);
     if(freshCursor.ok){freshCursor.receivedAtMs=millis();us=freshCursor;}
     else if(us.ok){us.status="stale: "+freshCursor.status;}
     else us=freshCursor;
     Serial.printf("[usage][cursor] %s\n",us.status.c_str());
-    if(displayGetScreen()==DisplayScreen::Usage) displayUpdate(cs,us,config.warningPercent,config.criticalPercent,config.refreshMinutes);
-    webUpdateUsage(cs,us);
-    haMqttPublish(us, cs, buildDeviceMeta());
+    bool rotateSecondary=config.codex.enabled&&config.codex.token.length()>0&&config.claude.enabled&&config.claude.token.length()>0;
+    if(displayGetScreen()==DisplayScreen::Usage) displayUpdate(cs,us,ls,rotateSecondary,config.warningPercent,config.criticalPercent,config.refreshMinutes);
+    webUpdateUsage(cs,us,ls);
+    haMqttPublish(us, cs, ls, buildDeviceMeta());
   }
   delay(5);
 }

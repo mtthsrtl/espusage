@@ -4,6 +4,7 @@
 
 static const char *requestLabel(const String &url) {
   if (url.indexOf("chatgpt.com") >= 0) return "codex";
+  if (url.indexOf("claude.ai") >= 0) return "claude";
   if (url.indexOf("cursor.com") >= 0 || url.indexOf("cursor.sh") >= 0) return "cursor";
   return "adapter";
 }
@@ -30,8 +31,12 @@ static bool request(const String &method, const String &url, const ProviderConfi
       http.addHeader("Origin", "https://cursor.com");
       http.addHeader("Referer", "https://cursor.com/dashboard");
     }
+    if (url.indexOf("claude.ai") >= 0) {
+      http.addHeader("Origin", "https://claude.ai");
+      http.addHeader("Referer", "https://claude.ai/settings/usage");
+    }
     if (cfg.token.length()) http.addHeader("Authorization", "Bearer " + cfg.token);
-    if (cfg.accountId.length()) http.addHeader("ChatGPT-Account-Id", cfg.accountId);
+    if (cfg.accountId.length() && url.indexOf("chatgpt.com") >= 0) http.addHeader("ChatGPT-Account-Id", cfg.accountId);
     if (cfg.session.length()) http.addHeader("Cookie", cfg.session);
     int code;
     if (method == "POST") { http.addHeader("Content-Type", "application/json"); code = http.POST(body); }

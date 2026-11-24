@@ -49,7 +49,8 @@ bool displaySetRemainingView(bool remaining);
 bool displayToggleRemainingView();
 bool displaySetScreen(DisplayScreen screen);
 DisplayScreen displayGetScreen();
-void displayUpdate(const UsageSnapshot &codex, const UsageSnapshot &cursor, uint8_t warningPercent, uint8_t criticalPercent, uint16_t refreshMinutes);
+void displayUpdate(const UsageSnapshot &codex, const UsageSnapshot &cursor, const UsageSnapshot &claude,
+                   bool rotateCodexClaude, uint8_t warningPercent, uint8_t criticalPercent, uint16_t refreshMinutes);
 void displayUpdatePrint(const BambuStatus &status);
 void displaySetNetwork(const String &text, bool connected);
 TouchDiagnostics displayGetTouchDiagnostics();

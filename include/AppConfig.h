@@ -40,6 +40,7 @@ struct AppConfig {
   String hostname = "espusage";
   ProviderConfig codex;
   ProviderConfig cursor;
+  ProviderConfig claude;
   BambuConfig bambu;
   MqttConfig mqtt;
   String tokenApiKey;

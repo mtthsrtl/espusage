@@ -21,7 +21,7 @@ static void putOnDemand(JsonObject out, const UsageWindow &window) {
 }
 
 size_t haBuildSensors(JsonDocument &out, const UsageSnapshot &cursor, const UsageSnapshot &codex,
-                      const HaDeviceMeta &device) {
+                      const UsageSnapshot &claude, const HaDeviceMeta &device) {
   out.clear();
   JsonObject root = out.to<JsonObject>();
 
@@ -75,6 +75,21 @@ size_t haBuildSensors(JsonDocument &out, const UsageSnapshot &cursor, const Usag
   root["codex_30m_samples"] = xr.samples;
   root["codex_30m_delta_pp"] = xr.deltaPercent;
   root["codex_30m_status"] = xr.status;
+
+  root["claude_ok"] = claude.ok;
+  root["claude_status"] = claude.status;
+  root["claude_plan"] = claude.plan;
+  root["claude_updated"] = claude.updated;
+  if (claude.credits >= 0) root["claude_credits"] = claude.credits;
+  else root["claude_credits"] = nullptr;
+  putWindow(root, "claude_5h", claude.primary);
+  putWindow(root, "claude_weekly", claude.secondary);
+  const RecentUsage30m &lr = claude.recent30m;
+  root["claude_30m_available"] = lr.available;
+  root["claude_30m_ready"] = lr.ready;
+  root["claude_30m_samples"] = lr.samples;
+  root["claude_30m_delta_pp"] = lr.deltaPercent;
+  root["claude_30m_status"] = lr.status;
 
   return root.size();
 }

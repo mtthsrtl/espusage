@@ -38,6 +38,7 @@ static uint32_t touchLastCallbackMs = 0, touchFallbackReads = 0;
 static lv_indev_t *touchInputDevice = nullptr;
 
 static lv_obj_t *networkLabel, *modeLabel, *providerStatusLabels[2], *providerPlanLabels[2];
+static lv_obj_t *providerTitleLabels[2], *providerIcons[2];
 static lv_obj_t *nameLabels[5], *statusLabels[5], *values[5], *bars[5], *paceMarkers[5], *resetLabels[5], *rows[5];
 static lv_obj_t *paceRows[2], *paceValues[2], *paceMeta[2], *paceColumns[2][6];
 static int barWidths[5], barHeights[5], barOffsets[5], barTops[5], markerY[5], paceChartBaseline[2], paceChartMaxHeight[2];
@@ -45,7 +46,10 @@ static String rowNames[5] = {"CURSOR MODELS","OTHER MODELS","ON DEMAND","5-HOUR 
 static const char *columnNames[5] = {"CUR", "OTH", "OD", "5H", "WK"};
 static UsageWindow rowData[5];
 static String rowStatus[5], networkAddress;
-static UsageSnapshot latestCodex, latestCursor;
+static UsageSnapshot latestCodex, latestCursor, latestClaude;
+static bool rotateCodexClaude = false;
+static bool showClaudePanel = false;
+static uint32_t lastSecondaryRotateMs = 0;
 static bool availableView = false;
 static DisplayScreen activeScreen = DisplayScreen::Usage;
 static lv_obj_t *usageScreen = nullptr, *printScreen = nullptr;
@@ -101,9 +105,47 @@ static void updateProviderStatus(uint8_t provider, const UsageSnapshot &snapshot
   lv_label_set_text(providerStatusLabels[provider], text.c_str());
 }
 
+static const UsageSnapshot &activeSecondarySnapshot() {
+  if (rotateCodexClaude) return showClaudePanel ? latestClaude : latestCodex;
+  if (latestClaude.ok && !latestCodex.ok) return latestClaude;
+  if (latestClaude.status != "disabled" && latestCodex.status == "disabled") return latestClaude;
+  return latestCodex;
+}
+
+static String formatPlanBadge(String plan);
+
+static void applySecondaryPanelChrome(const UsageSnapshot &snapshot) {
+  bool claude = rotateCodexClaude ? showClaudePanel : (snapshot.provider == "Claude");
+  if (providerTitleLabels[1]) lv_label_set_text(providerTitleLabels[1], claude ? "CLAUDE" : "CODEX");
+  if (providerIcons[1]) {
+    lv_img_set_src(providerIcons[1], &codexProviderIcon);
+    if (claude) {
+      lv_obj_set_style_img_recolor(providerIcons[1], C(0xD97757), 0);
+      lv_obj_set_style_img_recolor_opa(providerIcons[1], LV_OPA_COVER, 0);
+    } else {
+      lv_obj_set_style_img_recolor_opa(providerIcons[1], LV_OPA_TRANSP, 0);
+    }
+  }
+  String plan = formatPlanBadge(snapshot.plan);
+  if (providerPlanLabels[1]) {
+    lv_label_set_text(providerPlanLabels[1], plan.c_str());
+    if (plan.length()) lv_obj_clear_flag(providerPlanLabels[1], LV_OBJ_FLAG_HIDDEN);
+    else lv_obj_add_flag(providerPlanLabels[1], LV_OBJ_FLAG_HIDDEN);
+  }
+}
+
+static void applySecondaryUsageRows(const UsageSnapshot &snapshot) {
+  rowData[3] = snapshot.primary;
+  rowData[4] = snapshot.secondary;
+  rowStatus[3] = snapshot.status;
+  rowStatus[4] = snapshot.status;
+  applySecondaryPanelChrome(snapshot);
+  updateProviderStatus(1, snapshot);
+}
+
 static void updateProviderStatuses() {
   updateProviderStatus(0, latestCursor);
-  updateProviderStatus(1, latestCodex);
+  updateProviderStatus(1, activeSecondarySnapshot());
 }
 
 static lv_obj_t *label(lv_obj_t *parent, const char *text, const lv_font_t *font, lv_color_t color) {
@@ -412,7 +454,7 @@ static void renderMetric(uint8_t index) {
 
 static void renderPace(uint8_t provider) {
   if (!paceRows[provider]) return;
-  const RecentUsage30m &recent = provider == 0 ? latestCursor.recent30m : latestCodex.recent30m;
+  const RecentUsage30m &recent = provider == 0 ? latestCursor.recent30m : activeSecondarySnapshot().recent30m;
   String valueText, metaText;
   bool tokenChart = false;
   if (provider == 0) {
@@ -714,17 +756,18 @@ static lv_obj_t *makeProviderPanel(const char *title, uint8_t provider, int y, i
     lv_obj_set_style_radius(panel, 12, 0);
   } else if (flat) { lv_obj_set_style_bg_opa(panel, LV_OPA_TRANSP, 0); lv_obj_set_style_border_width(panel, 0, 0); }
   else panelStyle(panel);
-  lv_obj_t *providerIcon = lv_img_create(panel);
-  lv_img_set_src(providerIcon, provider == 0 ? &cursorProviderIcon : &codexProviderIcon);
-  lv_obj_set_pos(providerIcon, innerX, 5);
-  lv_obj_clear_flag(providerIcon, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+  providerIcons[provider] = lv_img_create(panel);
+  lv_img_set_src(providerIcons[provider], provider == 0 ? &cursorProviderIcon : &codexProviderIcon);
+  lv_obj_set_pos(providerIcons[provider], innerX, 5);
+  lv_obj_clear_flag(providerIcons[provider], LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
   // The supplied Cursor artwork is intentionally very dark. A partial white
   // recolor keeps its shape and shading visible on this dashboard background.
   if (provider == 0) {
-    lv_obj_set_style_img_recolor(providerIcon, C(0xFFFFFF), 0);
-    lv_obj_set_style_img_recolor_opa(providerIcon, 180, 0);
+    lv_obj_set_style_img_recolor(providerIcons[provider], C(0xFFFFFF), 0);
+    lv_obj_set_style_img_recolor_opa(providerIcons[provider], 180, 0);
   }
-  lv_obj_t *heading = label(panel, title, &lv_font_montserrat_20, C(0xFFFFFF)); lv_obj_set_pos(heading, innerX + 25, 2);
+  providerTitleLabels[provider] = label(panel, title, &lv_font_montserrat_20, C(0xFFFFFF));
+  lv_obj_set_pos(providerTitleLabels[provider], innerX + 25, 2);
   providerPlanLabels[provider] = label(panel, "", &lv_font_montserrat_12, C(0xD7FBEF));
   lv_obj_set_pos(providerPlanLabels[provider], innerX + 25 + (provider == 0 ? 98 : 84), 3);
   lv_obj_set_style_bg_color(providerPlanLabels[provider], C(0x173D33), 0); lv_obj_set_style_bg_opa(providerPlanLabels[provider], LV_OPA_COVER, 0);
@@ -750,14 +793,16 @@ static lv_obj_t *makeMatrixPanel(const char *title, uint8_t provider, int x, int
   lv_obj_set_style_bg_color(rail, C(provider == 0 ? 0x35D078 : 0x7198C7), 0); lv_obj_set_style_bg_opa(rail, LV_OPA_COVER, 0);
   lv_obj_set_style_border_width(rail, 0, 0); lv_obj_set_style_radius(rail, 2, 0); lv_obj_set_style_pad_all(rail, 0, 0);
   lv_obj_clear_flag(rail, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
-  lv_obj_t *providerIcon = lv_img_create(panel);
-  lv_img_set_src(providerIcon, provider == 0 ? &cursorProviderIcon : &codexProviderIcon);
-  lv_obj_set_pos(providerIcon, 10, 8); lv_obj_clear_flag(providerIcon, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+  providerIcons[provider] = lv_img_create(panel);
+  lv_img_set_src(providerIcons[provider], provider == 0 ? &cursorProviderIcon : &codexProviderIcon);
+  lv_obj_set_pos(providerIcons[provider], 10, 8);
+  lv_obj_clear_flag(providerIcons[provider], LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
   if (provider == 0) {
-    lv_obj_set_style_img_recolor(providerIcon, C(0xFFFFFF), 0);
-    lv_obj_set_style_img_recolor_opa(providerIcon, 180, 0);
+    lv_obj_set_style_img_recolor(providerIcons[provider], C(0xFFFFFF), 0);
+    lv_obj_set_style_img_recolor_opa(providerIcons[provider], 180, 0);
   }
-  lv_obj_t *heading = label(panel, title, &lv_font_montserrat_20, C(0xFFFFFF)); lv_obj_set_pos(heading, 35, 5);
+  providerTitleLabels[provider] = label(panel, title, &lv_font_montserrat_20, C(0xFFFFFF));
+  lv_obj_set_pos(providerTitleLabels[provider], 35, 5);
   providerPlanLabels[provider] = label(panel, "", &lv_font_montserrat_12, C(0xD7FBEF));
   lv_obj_set_pos(providerPlanLabels[provider], provider == 0 ? 120 : 111, 7);
   lv_obj_set_style_bg_color(providerPlanLabels[provider], C(provider == 0 ? 0x173D33 : 0x1A3047), 0); lv_obj_set_style_bg_opa(providerPlanLabels[provider], LV_OPA_COVER, 0);
@@ -779,12 +824,16 @@ static lv_obj_t *makeColumnPanel(const char *title, uint8_t provider, int x, int
   lv_obj_set_style_border_width(panel, 0, 0); lv_obj_set_style_radius(panel, 0, 0); lv_obj_set_style_pad_all(panel, 0, 0);
   lv_obj_clear_flag(panel, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
   innerX = 6; innerWidth = width - 12;
-  lv_obj_t *providerIcon = lv_img_create(panel); lv_img_set_src(providerIcon, provider == 0 ? &cursorProviderIcon : &codexProviderIcon);
-  lv_obj_set_pos(providerIcon, 8, 7); lv_obj_clear_flag(providerIcon, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+  providerIcons[provider] = lv_img_create(panel);
+  lv_img_set_src(providerIcons[provider], provider == 0 ? &cursorProviderIcon : &codexProviderIcon);
+  lv_obj_set_pos(providerIcons[provider], 8, 7);
+  lv_obj_clear_flag(providerIcons[provider], LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
   if (provider == 0) {
-    lv_obj_set_style_img_recolor(providerIcon, C(0xFFFFFF), 0); lv_obj_set_style_img_recolor_opa(providerIcon, 180, 0);
+    lv_obj_set_style_img_recolor(providerIcons[provider], C(0xFFFFFF), 0);
+    lv_obj_set_style_img_recolor_opa(providerIcons[provider], 180, 0);
   }
-  lv_obj_t *heading = label(panel, title, &lv_font_montserrat_20, C(0xFFFFFF)); lv_obj_set_pos(heading, 33, 4);
+  providerTitleLabels[provider] = label(panel, title, &lv_font_montserrat_20, C(0xFFFFFF));
+  lv_obj_set_pos(providerTitleLabels[provider], 33, 4);
   providerPlanLabels[provider] = label(panel, "", &lv_font_montserrat_12, C(0xD7FBEF));
   lv_obj_set_pos(providerPlanLabels[provider], provider == 0 ? 120 : 111, 6);
   lv_obj_set_style_bg_color(providerPlanLabels[provider], C(provider == 0 ? 0x173D33 : 0x1A3047), 0); lv_obj_set_style_bg_opa(providerPlanLabels[provider], LV_OPA_COVER, 0);
@@ -972,6 +1021,12 @@ void displayLoop() {
     touchPendingToggle = false;
     touchToggleEvents++; touchLastEventMs = millis(); touchLastEvent = "view toggled";
     toggleView();
+  }
+  if (rotateCodexClaude && activeScreen == DisplayScreen::Usage && millis() - lastSecondaryRotateMs >= 5000) {
+    lastSecondaryRotateMs = millis();
+    showClaudePanel = !showClaudePanel;
+    applySecondaryUsageRows(activeSecondarySnapshot());
+    renderAll();
   }
   if (millis() - lastStatusRefreshMs >= 1000) {
     lastStatusRefreshMs = millis();
@@ -1201,25 +1256,26 @@ const uint16_t *displayGetFramebuffer() {
   return gfx ? gfx->getFramebuffer() : nullptr;
 }
 
-void displayUpdate(const UsageSnapshot &codex, const UsageSnapshot &cursor, uint8_t warningPercent, uint8_t criticalPercent, uint16_t refreshMinutes) {
-  latestCodex = codex; latestCursor = cursor; warningLevel = warningPercent; criticalLevel = criticalPercent;
+void displayUpdate(const UsageSnapshot &codex, const UsageSnapshot &cursor, const UsageSnapshot &claude,
+                   bool rotateSecondary, uint8_t warningPercent, uint8_t criticalPercent, uint16_t refreshMinutes) {
+  latestCodex = codex; latestCursor = cursor; latestClaude = claude;
+  rotateCodexClaude = rotateSecondary;
+  if (!rotateCodexClaude) showClaudePanel = claude.provider == "Claude" && (claude.ok || (!codex.ok && claude.status != "disabled"));
+  warningLevel = warningPercent; criticalLevel = criticalPercent;
   staleAfterSeconds = max((uint32_t)120, (uint32_t)refreshMinutes * 60 + 90);
   rowData[0] = cursor.primary; rowData[1] = cursor.secondary; rowData[2] = cursor.tertiary;
-  rowData[3] = codex.primary; rowData[4] = codex.secondary;
   for (uint8_t i = 0; i < 3; ++i) rowStatus[i] = cursor.status;
-  rowStatus[3] = codex.status; rowStatus[4] = codex.status;
-  updateProviderStatuses();
-  String cursorPlan = formatPlanBadge(cursor.plan), codexPlan = formatPlanBadge(codex.plan);
+  const UsageSnapshot &secondary = activeSecondarySnapshot();
+  applySecondaryUsageRows(secondary);
+  updateProviderStatus(0, latestCursor);
+  String cursorPlan = formatPlanBadge(cursor.plan);
   if (providerPlanLabels[0]) {
     lv_label_set_text(providerPlanLabels[0], cursorPlan.c_str());
     if (cursorPlan.length()) lv_obj_clear_flag(providerPlanLabels[0], LV_OBJ_FLAG_HIDDEN); else lv_obj_add_flag(providerPlanLabels[0], LV_OBJ_FLAG_HIDDEN);
   }
-  if (providerPlanLabels[1]) {
-    lv_label_set_text(providerPlanLabels[1], codexPlan.c_str());
-    if (codexPlan.length()) lv_obj_clear_flag(providerPlanLabels[1], LV_OBJ_FLAG_HIDDEN); else lv_obj_add_flag(providerPlanLabels[1], LV_OBJ_FLAG_HIDDEN);
-  }
   renderAll();
-  Serial.printf("[display] view=%s, Cursor %.1f / %.1f / %.1f, Codex weekly %.1f\n",
+  Serial.printf("[display] view=%s, Cursor %.1f / %.1f / %.1f, secondary=%s weekly %.1f, rotate=%u\n",
                 availableView ? "remaining" : "used", cursor.primary.usedPercent, cursor.secondary.usedPercent,
-                cursor.tertiary.usedPercent, codex.secondary.usedPercent);
+                cursor.tertiary.usedPercent, secondary.provider.c_str(), secondary.secondary.usedPercent,
+                rotateCodexClaude ? 1 : 0);
 }

@@ -73,6 +73,23 @@ static const HaSensorMeta SENSOR_META[] = {
   {"codex_30m_samples", "Codex 30m Samples", nullptr, nullptr, "measurement", false},
   {"codex_30m_delta_pp", "Codex 30m Delta", "pp", nullptr, "measurement", false},
   {"codex_30m_status", "Codex 30m Status", nullptr, nullptr, nullptr, false},
+
+  {"claude_ok", "Claude OK", nullptr, nullptr, nullptr, true},
+  {"claude_status", "Claude Status", nullptr, nullptr, nullptr, false},
+  {"claude_plan", "Claude Plan", nullptr, nullptr, nullptr, false},
+  {"claude_updated", "Claude Updated", nullptr, nullptr, nullptr, false},
+  {"claude_credits", "Claude Credits", nullptr, nullptr, "measurement", false},
+  {"claude_5h_used_percent", "Claude 5h Used", "%", nullptr, "measurement", false},
+  {"claude_5h_elapsed_percent", "Claude 5h Elapsed", "%", nullptr, "measurement", false},
+  {"claude_5h_reset", "Claude 5h Reset", nullptr, nullptr, nullptr, false},
+  {"claude_weekly_used_percent", "Claude Weekly Used", "%", nullptr, "measurement", false},
+  {"claude_weekly_elapsed_percent", "Claude Weekly Elapsed", "%", nullptr, "measurement", false},
+  {"claude_weekly_reset", "Claude Weekly Reset", nullptr, nullptr, nullptr, false},
+  {"claude_30m_available", "Claude 30m Available", nullptr, nullptr, nullptr, true},
+  {"claude_30m_ready", "Claude 30m Ready", nullptr, nullptr, nullptr, true},
+  {"claude_30m_samples", "Claude 30m Samples", nullptr, nullptr, "measurement", false},
+  {"claude_30m_delta_pp", "Claude 30m Delta", "pp", nullptr, "measurement", false},
+  {"claude_30m_status", "Claude 30m Status", nullptr, nullptr, nullptr, false},
 };
 
 static AppConfig *cfg = nullptr;
@@ -212,13 +229,14 @@ void haMqttLoop() {
   if (!discoveryDone || (millis() - lastDiscoveryMs > 1800000UL)) publishDiscoveryAll();
 }
 
-void haMqttPublish(const UsageSnapshot &cursor, const UsageSnapshot &codex, const HaDeviceMeta &device) {
+void haMqttPublish(const UsageSnapshot &cursor, const UsageSnapshot &codex, const UsageSnapshot &claude,
+                   const HaDeviceMeta &device) {
   if (!cfg || !cfg->mqtt.enabled || !cfg->mqtt.host.length()) return;
   if (!ensureConnected()) return;
   if (!discoveryDone) publishDiscoveryAll();
 
   JsonDocument sensors;
-  haBuildSensors(sensors, cursor, codex, device);
+  haBuildSensors(sensors, cursor, codex, claude, device);
   JsonObject root = sensors.as<JsonObject>();
   uint16_t published = 0;
   for (JsonPair kv : root) {

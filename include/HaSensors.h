@@ -19,7 +19,7 @@ struct HaDeviceMeta {
 
 // Fills a flat JSON object with all HA sensor keys. Returns sensor count.
 size_t haBuildSensors(JsonDocument &out, const UsageSnapshot &cursor, const UsageSnapshot &codex,
-                      const HaDeviceMeta &device);
+                      const UsageSnapshot &claude, const HaDeviceMeta &device);
 
 // Copies only keys with the given prefix (e.g. "cursor_", "codex_") plus optional extras.
 void haFilterPrefix(const JsonDocument &all, JsonDocument &out, const char *prefix);

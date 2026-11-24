@@ -21,6 +21,11 @@ bool loadConfig(AppConfig &c) {
   c.cursor.endpoint = prefs.getString("cursor_url", "https://cursor.com/api/usage-summary");
   c.cursor.token = prefs.getString("cursor_tok", "");
   c.cursor.session = prefs.getString("cursor_sess", "");
+  c.claude.enabled = prefs.getBool("claude_on", false);
+  c.claude.endpoint = prefs.getString("claude_url", "");
+  c.claude.token = prefs.getString("claude_tok", "");
+  c.claude.session = prefs.getString("claude_sess", "");
+  c.claude.accountId = prefs.getString("claude_acct", "");
   c.brightness = prefs.getUChar("bright", 85);
   c.refreshMinutes = prefs.getUShort("refresh", 5);
   c.warningPercent = prefs.getUChar("warn_pct", 70);
@@ -92,6 +97,9 @@ bool saveConfig(const AppConfig &c) {
   prefs.putString("token_api_key", c.tokenApiKey);
   prefs.putBool("cursor_on", c.cursor.enabled); prefs.putString("cursor_url", c.cursor.endpoint);
   prefs.putString("cursor_tok", c.cursor.token); prefs.putString("cursor_sess", c.cursor.session);
+  prefs.putBool("claude_on", c.claude.enabled); prefs.putString("claude_url", c.claude.endpoint);
+  prefs.putString("claude_tok", c.claude.token); prefs.putString("claude_sess", c.claude.session);
+  prefs.putString("claude_acct", c.claude.accountId);
   prefs.putUChar("bright", c.brightness); prefs.putUShort("refresh", c.refreshMinutes);
   prefs.putUChar("warn_pct", c.warningPercent); prefs.putUChar("crit_pct", c.criticalPercent);
   prefs.putUInt("over_color", c.overpaceColor & 0xFFFFFF); prefs.putUInt("warn_color", c.warningColor & 0xFFFFFF);

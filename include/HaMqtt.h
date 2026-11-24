@@ -6,5 +6,6 @@
 void haMqttBegin(AppConfig &config);
 void haMqttConfigure(AppConfig &config);
 void haMqttLoop();
-void haMqttPublish(const UsageSnapshot &cursor, const UsageSnapshot &codex, const HaDeviceMeta &device);
+void haMqttPublish(const UsageSnapshot &cursor, const UsageSnapshot &codex, const UsageSnapshot &claude,
+                   const HaDeviceMeta &device);
 bool haMqttConnected();
