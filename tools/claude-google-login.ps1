@@ -8,11 +8,12 @@ param(
 $ErrorActionPreference = "Stop"
 $DeviceUrl = $DeviceUrl.TrimEnd("/")
 $ClientId = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
-$TokenUrl = "https://platform.claude.com/v1/oauth/token"
+# Hosted code callback + token endpoint used by Claude Code / documented working flow.
+$TokenUrl = "https://console.anthropic.com/v1/oauth/token"
 $AuthUrl = "https://claude.ai/oauth/authorize"
-$ManualRedirect = "https://platform.claude.com/oauth/code/callback"
-$LocalRedirect = "http://localhost:54545/callback"
-$AuthorizeScope = "org:create_api_key user:profile user:inference user:sessions:claude_code user:mcp_servers user:file_upload"
+$ManualRedirect = "https://console.anthropic.com/oauth/code/callback"
+# Keep scopes minimal but include profile (required by /api/oauth/usage).
+$AuthorizeScope = "user:profile user:inference user:sessions:claude_code user:mcp_servers"
 
 Write-Host "Claude OAuth helper for ESP Usage"
 Write-Host "Uses Claude Code OAuth (sk-ant-oat...). Browser sessionKey cookies are blocked by Cloudflare."
@@ -32,7 +33,7 @@ function New-Base64Url([byte[]]$bytes) {
 function New-PkcePair {
     $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
     $verifierBytes = New-Object byte[] 32
-    $stateBytes = New-Object byte[] 16
+    $stateBytes = New-Object byte[] 32
     $rng.GetBytes($verifierBytes)
     $rng.GetBytes($stateBytes)
     $verifier = New-Base64Url $verifierBytes
@@ -42,13 +43,18 @@ function New-PkcePair {
     [pscustomobject]@{ Verifier = $verifier; Challenge = $challenge; State = $state }
 }
 
+function Encode-OAuthScope([string]$scope) {
+    # OAuth query strings conventionally use '+' for spaces (claude.ai expects this).
+    (($scope -split "\s+") | ForEach-Object { [uri]::EscapeDataString($_) }) -join "+"
+}
+
 function Get-AuthorizeUrl([string]$redirectUri, $pkce) {
     $pairs = @(
         "code=true",
         "client_id=$ClientId",
         "response_type=code",
         "redirect_uri=$([uri]::EscapeDataString($redirectUri))",
-        "scope=$([uri]::EscapeDataString($AuthorizeScope))",
+        "scope=$(Encode-OAuthScope $AuthorizeScope)",
         "code_challenge=$($pkce.Challenge)",
         "code_challenge_method=S256",
         "state=$($pkce.State)"
@@ -56,20 +62,19 @@ function Get-AuthorizeUrl([string]$redirectUri, $pkce) {
     return ("{0}?{1}" -f $AuthUrl, ($pairs -join "&"))
 }
 
-function Exchange-AuthCode([string]$code, [string]$redirectUri, $pkce) {
-    $bodyObj = @{
+function Exchange-AuthCode([string]$code, [string]$redirectUri, $pkce, [string]$state) {
+    $bodyObj = [ordered]@{
         grant_type    = "authorization_code"
         code          = $code
-        redirect_uri  = $redirectUri
+        state         = $state
         client_id     = $ClientId
+        redirect_uri  = $redirectUri
         code_verifier = $pkce.Verifier
-        state         = $pkce.State
     }
     $body = $bodyObj | ConvertTo-Json -Compress
-    return Invoke-RestMethod -Method Post -Uri $TokenUrl -ContentType "application/json" -Body $body -Headers @{
-        "anthropic-beta" = "oauth-2025-04-20"
-        "User-Agent"     = "claude-code/2.0.0"
-        Accept           = "application/json"
+    return Invoke-RestMethod -Method Post -Uri $TokenUrl -ContentType "application/json; charset=utf-8" -Body $body -Headers @{
+        Accept       = "application/json"
+        "User-Agent" = "claude-code/2.0.0"
     }
 }
 
@@ -85,21 +90,20 @@ function Try-RefreshAccessToken([string]$path) {
         return $access
     }
     Write-Host "Refreshing Claude Code OAuth token..."
-    $body = @{
+    $body = (@{
         grant_type    = "refresh_token"
         refresh_token = [string]$cred.claudeAiOauth.refreshToken
         client_id     = $ClientId
-    } | ConvertTo-Json -Compress
+    } | ConvertTo-Json -Compress)
     try {
-        $tok = Invoke-RestMethod -Method Post -Uri $TokenUrl -ContentType "application/json" -Body $body -Headers @{
-            "anthropic-beta" = "oauth-2025-04-20"
-            "User-Agent"     = "claude-code/2.0.0"
+        $tok = Invoke-RestMethod -Method Post -Uri $TokenUrl -ContentType "application/json; charset=utf-8" -Body $body -Headers @{
+            Accept       = "application/json"
+            "User-Agent" = "claude-code/2.0.0"
         }
     } catch {
         Write-Host "Refresh failed; starting interactive Google/Claude login..."
         return $null
     }
-    if (-not $cred.claudeAiOauth) { $cred | Add-Member -NotePropertyName claudeAiOauth -NotePropertyValue ([pscustomobject]@{}) -Force }
     $cred.claudeAiOauth.accessToken = [string]$tok.access_token
     if ($tok.refresh_token) { $cred.claudeAiOauth.refreshToken = [string]$tok.refresh_token }
     $cred.claudeAiOauth.expiresAt = [int64]($nowMs + ([int]$tok.expires_in * 1000))
@@ -108,16 +112,8 @@ function Try-RefreshAccessToken([string]$path) {
     return [string]$tok.access_token
 }
 
-function Start-InteractiveClaudeLogin([string]$path) {
-    $pkce = New-PkcePair
-    $redirect = $ManualRedirect
-    $url = Get-AuthorizeUrl $redirect $pkce
-    Write-Host ""
-    Write-Host "Opening browser for Claude/Google login..."
-    Write-Host "After login, the page shows an authorization code."
-    Write-Host "Paste the FULL code (often looks like CODE#STATE) below."
-    Write-Host ""
-    Write-Host "Login URL (open manually if the browser does not start):"
+function Open-BrowserUrl([string]$url) {
+    Write-Host "Login URL:"
     Write-Host $url
     Write-Host ""
     $opened = $false
@@ -131,19 +127,30 @@ function Start-InteractiveClaudeLogin([string]$path) {
     if (-not $opened) {
         Write-Host "Could not auto-open a browser. Copy the URL above into Chrome/Edge."
     }
+}
+
+function Start-InteractiveClaudeLogin([string]$path) {
+    $pkce = New-PkcePair
+    $redirect = $ManualRedirect
+    $url = Get-AuthorizeUrl $redirect $pkce
+    Write-Host ""
+    Write-Host "Opening browser for Claude/Google login..."
+    Write-Host "After login you land on console.anthropic.com with an authorization code."
+    Write-Host "Paste the FULL value (CODE#STATE)."
+    Write-Host ""
+    Open-BrowserUrl $url
 
     $raw = Read-Host "Paste authorization code"
     $raw = $raw.Trim().Trim("'").Trim('"')
     if (-not $raw) { throw "No authorization code provided." }
 
     $code = $raw
-    $returnedState = $null
+    $returnedState = $pkce.State
     if ($raw.Contains("#")) {
         $parts = $raw.Split("#", 2)
         $code = $parts[0].Trim()
-        $returnedState = $parts[1].Trim()
-    } elseif ($raw.Contains("&")) {
-        # Sometimes users paste query strings: code=...&state=...
+        if ($parts[1].Trim()) { $returnedState = $parts[1].Trim() }
+    } elseif ($raw.Contains("&") -or $raw.Contains("=")) {
         foreach ($piece in $raw.TrimStart("?").Split("&")) {
             $kv = $piece.Split("=", 2)
             if ($kv.Count -ne 2) { continue }
@@ -151,15 +158,22 @@ function Start-InteractiveClaudeLogin([string]$path) {
             if ($kv[0] -eq "state") { $returnedState = [uri]::UnescapeDataString($kv[1]) }
         }
     }
-    if ($returnedState -and $returnedState -ne $pkce.State) {
+    if ($returnedState -ne $pkce.State) {
         throw "OAuth state mismatch. Close the browser tab and re-run the helper."
     }
 
     Write-Host "Exchanging authorization code..."
-    $tok = Exchange-AuthCode $code $redirect $pkce
+    try {
+        $tok = Exchange-AuthCode $code $redirect $pkce $returnedState
+    } catch {
+        $detail = $_.Exception.Message
+        if ($_.ErrorDetails.Message) { $detail = $_.ErrorDetails.Message }
+        throw "Token exchange failed: $detail"
+    }
+
     $nowMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
-    $cred = @{
-        claudeAiOauth = @{
+    $cred = [pscustomobject]@{
+        claudeAiOauth = [pscustomobject]@{
             accessToken      = [string]$tok.access_token
             refreshToken     = $(if ($tok.refresh_token) { [string]$tok.refresh_token } else { "" })
             expiresAt        = [int64]($nowMs + ([int]$tok.expires_in * 1000))
@@ -167,7 +181,10 @@ function Start-InteractiveClaudeLogin([string]$path) {
             subscriptionType = ""
         }
     }
-    Save-ClaudeCredentials ([pscustomobject]$cred) $path
+    if ($tok.organization -and $tok.organization.uuid) {
+        $cred | Add-Member -NotePropertyName organizationUuid -NotePropertyValue ([string]$tok.organization.uuid)
+    }
+    Save-ClaudeCredentials $cred $path
     Write-Host "Login saved to $path"
     return [string]$tok.access_token
 }
