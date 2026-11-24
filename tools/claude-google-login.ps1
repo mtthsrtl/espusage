@@ -53,7 +53,7 @@ function Get-AuthorizeUrl([string]$redirectUri, $pkce) {
         "code_challenge_method=S256",
         "state=$($pkce.State)"
     )
-    return "$AuthUrl?" + ($pairs -join "&")
+    return ("{0}?{1}" -f $AuthUrl, ($pairs -join "&"))
 }
 
 function Exchange-AuthCode([string]$code, [string]$redirectUri, $pkce) {
