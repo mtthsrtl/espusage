@@ -112,6 +112,12 @@ static String planFromProfile(JsonDocument &profile) {
 static String cachedClaudePlan;
 static uint32_t cachedClaudePlanAtMs = 0;
 static constexpr uint32_t CLAUDE_PLAN_CACHE_MS = 6UL * 60UL * 60UL * 1000UL;
+// Anthropic OAuth usage is rate-limited; panel refresh can be 1–2 minutes.
+static constexpr uint32_t CLAUDE_MIN_INTERVAL_MS = 10UL * 60UL * 1000UL;
+static constexpr uint32_t CLAUDE_BACKOFF_MIN_MS = 15UL * 60UL * 1000UL;
+static constexpr uint32_t CLAUDE_BACKOFF_MAX_MS = 60UL * 60UL * 1000UL;
+static uint32_t nextClaudeFetchMs = 0;
+static uint32_t claudeBackoffMs = 0;
 
 void ClaudeProvider::seedPlanCache(const String &plan) {
   String value = plan;
@@ -120,6 +126,20 @@ void ClaudeProvider::seedPlanCache(const String &plan) {
   cachedClaudePlan = value;
   // NVS seed: skip profile on the first refresh after boot; RAM TTL still applies.
   cachedClaudePlanAtMs = millis() ? millis() : 1;
+}
+
+static void scheduleClaudeSuccess() {
+  claudeBackoffMs = 0;
+  nextClaudeFetchMs = millis() + CLAUDE_MIN_INTERVAL_MS;
+}
+
+static void scheduleClaudeBackoff429() {
+  claudeBackoffMs = claudeBackoffMs
+    ? min<uint32_t>(claudeBackoffMs * 2u, CLAUDE_BACKOFF_MAX_MS)
+    : CLAUDE_BACKOFF_MIN_MS;
+  nextClaudeFetchMs = millis() + claudeBackoffMs;
+  Serial.printf("[usage][claude] HTTP 429 — backing off %u min\n",
+                (unsigned)(claudeBackoffMs / 60000UL));
 }
 
 static UsageSnapshot fetchOAuthUsage(const ProviderConfig &cfg, bool tls, const String &accessToken) {
@@ -134,11 +154,16 @@ static UsageSnapshot fetchOAuthUsage(const ProviderConfig &cfg, bool tls, const 
   String error;
   if (!getJson("https://api.anthropic.com/api/oauth/usage", request, tls, d, error)) {
     out.status = error;
-    if (error == "HTTP 401" || error == "HTTP 403")
+    if (error == "HTTP 429") {
+      scheduleClaudeBackoff429();
+      out.status = "HTTP 429 (rate limited, retry in " + String(claudeBackoffMs / 60000UL) + "m)";
+    } else if (error == "HTTP 401" || error == "HTTP 403") {
       out.status = error + " (Claude OAuth token invalid/expired - re-run PC helper)";
+    }
     return out;
   }
   fillFromUsageDocument(d, out, "online (Claude OAuth)");
+  scheduleClaudeSuccess();
   if (cachedClaudePlan.length() && cachedClaudePlanAtMs &&
       (millis() - cachedClaudePlanAtMs) < CLAUDE_PLAN_CACHE_MS) {
     out.plan = cachedClaudePlan;
@@ -178,6 +203,13 @@ UsageSnapshot ClaudeProvider::fetch(const ProviderConfig &cfg, bool tls) {
   // (ESP and PowerShell). Prefer Claude Code OAuth against api.anthropic.com.
   if (isSessionCookieToken(token)) {
     out.status = "HTTP 403 (sessionKey blocked by Cloudflare - use Claude Code OAuth via PC helper)";
+    return out;
+  }
+
+  if (nextClaudeFetchMs && (int32_t)(millis() - nextClaudeFetchMs) < 0) {
+    uint32_t remainMin = (nextClaudeFetchMs - millis() + 59999UL) / 60000UL;
+    out.status = "cooldown (" + String(remainMin) + "m)";
+    Serial.printf("[usage][claude] Skipping fetch, cooldown %um left\n", (unsigned)remainMin);
     return out;
   }
 

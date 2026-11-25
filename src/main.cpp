@@ -440,6 +440,7 @@ void loop(){
       updateClaudePace(freshClaude);
       ls=freshClaude;
     }else if(ls.ok){
+      // Keep bars on 429/cooldown — Anthropic rate-limits the OAuth usage API.
       ls.status="stale: "+freshClaude.status;
       Serial.printf("[usage][claude] Keeping last valid snapshot after %s\n",freshClaude.status.c_str());
     }else ls=freshClaude;
